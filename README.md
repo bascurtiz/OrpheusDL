@@ -57,6 +57,7 @@ Follow these steps to get a local copy of Orpheus up and running:
    ```shell
    pip install --no-deps --target vendor/librespot git+https://github.com/kokarare1212/librespot-python
    ```
+   **Note:** This installs librespot into a vendor directory to avoid protobuf version conflicts. The librespot dependencies (websocket-client, pyogg, zeroconf) are already included in step 2 via `requirements.txt`.
 4. Run the program at least once, or use this command to create the settings file
    ```shell
    python orpheus.py settings refresh
