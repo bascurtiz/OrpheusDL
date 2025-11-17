@@ -8,7 +8,7 @@ tqdm>=4.60.0
 mutagen>=1.45.1
 ffmpeg-python>=0.2.0
 m3u8>=2.0.0
-librespot @ git+https://github.com/justin025/librespot-python.git
+protobuf>=6.33.0,<7
 pkce>=1.0.3
 pywidevine
 yt-dlp

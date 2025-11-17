@@ -53,11 +53,15 @@ Follow these steps to get a local copy of Orpheus up and running:
    ```shell
    pip install --upgrade --ignore-installed -r requirements.txt
    ```
-3. Run the program at least once, or use this command to create the settings file
+3. Install vendored librespot (required for Spotify module, avoids protobuf conflicts)
+   ```shell
+   pip install --no-deps --target vendor/librespot git+https://github.com/kokarare1212/librespot-python
+   ```
+4. Run the program at least once, or use this command to create the settings file
    ```shell
    python orpheus.py settings refresh
    ```
-4. Enter your credentials in `config/settings.json`
+5. Enter your credentials in `config/settings.json`
 
 <!-- USAGE EXAMPLES -->
 ## Usage
