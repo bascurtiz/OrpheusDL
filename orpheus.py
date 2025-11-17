@@ -2,6 +2,9 @@
 import os
 os.environ['PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION'] = 'python'
 
+from utils.vendor_bootstrap import bootstrap_vendor_paths
+bootstrap_vendor_paths()
+
 import argparse
 import re
 import json
