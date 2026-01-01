@@ -599,6 +599,10 @@ class Downloader:
                 kwargs_for_playlist_info.pop('data', None)
 
         playlist_info: PlaylistInfo = self.service.get_playlist_info(playlist_id, **kwargs_for_playlist_info)
+        if not playlist_info:
+            logging.warning(f"Could not retrieve playlist info for {playlist_id} from {self.service_name}. Skipping playlist.")
+            return []
+        
         self.print(f'=== Downloading playlist {playlist_info.name} ({playlist_id}) ===', drop_level=1)
         self.print(f'Playlist creator: {playlist_info.creator}' + (f' ({playlist_info.creator_id})' if playlist_info.creator_id else ''))
         if playlist_info.release_year: self.print(f'Playlist creation year: {playlist_info.release_year}')
@@ -1802,13 +1806,22 @@ class Downloader:
 
         # Get track info
         try:
-            track_info: TrackInfo = self.service.get_track_info(track_id, quality_tier, codec_options, **extra_kwargs)
+            # Ensure extra_kwargs is always a dictionary
+            safe_extra_kwargs = extra_kwargs if extra_kwargs is not None else {}
+            track_info: TrackInfo = self.service.get_track_info(track_id, quality_tier, codec_options, **safe_extra_kwargs)
         except Exception as e:
             self.print(f'Could not get track info for {track_id}: {e}')
             symbols = self._get_status_symbols()
             d_print(f'=== {symbols["error"]} Track failed ===', drop_level=header_drop_level)
             if isinstance(e, SpotifyRateLimitDetectedError):
                 return return_with_blank_line("RATE_LIMITED")
+            return return_with_blank_line(None)
+
+        # Check if track_info is None (e.g., episode not found, track unavailable)
+        if track_info is None:
+            self.print(f'Track info is None for {track_id}. Track may be unavailable or not found.')
+            symbols = self._get_status_symbols()
+            d_print(f'=== {symbols["error"]} Track failed ===', drop_level=header_drop_level)
             return return_with_blank_line(None)
 
         # For single track downloads, use no indentation for headers but keep indentation for details
@@ -1934,7 +1947,9 @@ class Downloader:
                 download_info: TrackDownloadInfo = self.service.get_track_download(**track_info.download_extra_kwargs)
             else:
                 # Try the full signature first (for modules that support it)
-                download_info: TrackDownloadInfo = self.service.get_track_download(track_id, quality_tier, codec_options, **extra_kwargs)
+                # Ensure extra_kwargs is always a dictionary
+                safe_extra_kwargs = extra_kwargs if extra_kwargs is not None else {}
+                download_info: TrackDownloadInfo = self.service.get_track_download(track_id, quality_tier, codec_options, **safe_extra_kwargs)
         except SpotifyRateLimitDetectedError as e:
             d_print(f'Rate limit detected for {track_id}')
             symbols = self._get_status_symbols()
@@ -2266,6 +2281,7 @@ class Downloader:
             
             if not conversions:
                 return (file_path, None, None)  # Return tuple like old version
+            
             
             # Use track_info.codec (which is already a CodecEnum) to check for conversions
             codec = track_info.codec
