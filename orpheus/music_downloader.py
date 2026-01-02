@@ -906,6 +906,10 @@ class Downloader:
         track_tags['total_discs'] = str(track_info.tags.total_discs) if track_info.tags.total_discs else ''
         track_tags['quality'] = track_info.codec.name if track_info.codec else ''
         track_tags['artist_initials'] = self._get_artist_initials_from_name(AlbumInfo(name='', artist=track_tags['artist'], tracks=[], release_year=0))
+
+        # Add aliases for GUI format compatibility (required by default format strings)
+        track_tags['track_name'] = track_tags.get('name', track_info.name if track_info.name else '')
+        track_tags['track_artist'] = track_tags.get('artist', '')
         
         # Handle track/disc number formatting with zero-fill if enabled
         if self.global_settings['formatting']['enable_zfill']:
