@@ -1,4 +1,4 @@
-import importlib, json, logging, os, pickle, requests, urllib3, base64, shutil
+import importlib, json, logging, os, pickle, requests, urllib3, base64, shutil, sys
 from datetime import datetime
 
 from orpheus.music_downloader import Downloader
@@ -149,8 +149,7 @@ class Orpheus:
         os.makedirs('modules', exist_ok=True)
         module_list = [module.lower() for module in os.listdir('modules') if os.path.exists(f'modules/{module}/interface.py')]
         if not module_list or module_list == ['example']:
-            print('No modules are installed, quitting')
-            exit()
+            raise Exception('No modules are installed. Please install at least one module in the modules folder.')
         logging.debug('Orpheus: Modules detected: ' + ", ".join(module_list))
 
         for module in module_list:  # Loading module information into module_settings
@@ -382,7 +381,8 @@ class Orpheus:
 
         if new_setting_detected:
             print('New settings detected, or the configuration has been reset. Please update settings.json')
-            exit()
+            # Don't exit in GUI mode - just print the message and continue
+            # The GUI will handle showing appropriate messages to the user
 
 
 def orpheus_core_download(orpheus_session: Orpheus, media_to_download, third_party_modules, separate_download_module, output_path, use_ansi_colors=True):
