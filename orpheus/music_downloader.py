@@ -1,4 +1,4 @@
-import logging, os, ffmpeg
+import logging, os
 import shutil
 import unicodedata
 from dataclasses import asdict
@@ -11,7 +11,17 @@ import re
 import platform
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from ffmpeg import Error
+# Lazy import ffmpeg to avoid circular import issues in PyInstaller bundles
+ffmpeg = None
+Error = None
+
+def _ensure_ffmpeg_imported():
+    """Lazily import ffmpeg module to avoid circular import issues."""
+    global ffmpeg, Error
+    if ffmpeg is None:
+        import ffmpeg as _ffmpeg
+        ffmpeg = _ffmpeg
+        Error = _ffmpeg.Error
 
 from orpheus.tagging import tag_file
 from utils.models import *
