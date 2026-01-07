@@ -2359,27 +2359,36 @@ class Downloader:
             if not ffmpeg_path or ffmpeg_path.strip() == '':
                 ffmpeg_path = 'ffmpeg'
             
-            # Debug: print the ffmpeg path being used
             import platform
+            import subprocess as sp
+            
+            # Helper to test if an ffmpeg path works
+            def test_ffmpeg(path):
+                try:
+                    result = sp.run([path, '-version'], capture_output=True, timeout=3)
+                    return result.returncode == 0
+                except:
+                    return False
+            
+            # Try the configured path first, then fallbacks on macOS
+            original_ffmpeg_path = ffmpeg_path
+            if platform.system() == 'Darwin':
+                if not test_ffmpeg(ffmpeg_path):
+                    # Try common macOS ffmpeg locations as fallback
+                    fallback_paths = [
+                        '/usr/local/bin/ffmpeg',      # Homebrew Intel
+                        '/opt/homebrew/bin/ffmpeg',   # Homebrew Apple Silicon
+                        'ffmpeg'                       # System PATH
+                    ]
+                    for fallback in fallback_paths:
+                        if fallback != ffmpeg_path and test_ffmpeg(fallback):
+                            print(f'        [FFmpeg] Using fallback: {fallback}')
+                            ffmpeg_path = fallback
+                            break
+            
+            # Debug: print the ffmpeg path being used
             if self.global_settings.get('advanced', {}).get('debug_mode', False):
                 print(f'        [Debug] Using FFmpeg path: {ffmpeg_path}')
-            
-            # On macOS, check if custom ffmpeg path exists and is executable
-            if platform.system() == 'Darwin' and ffmpeg_path != 'ffmpeg':
-                if os.path.isfile(ffmpeg_path):
-                    if not os.access(ffmpeg_path, os.X_OK):
-                        # Try to make it executable
-                        try:
-                            import stat
-                            current_mode = os.stat(ffmpeg_path).st_mode
-                            os.chmod(ffmpeg_path, current_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-                            print(f'        [FFmpeg] Made executable: {ffmpeg_path}')
-                        except Exception as chmod_err:
-                            print(f'        Warning: FFmpeg at {ffmpeg_path} is not executable.')
-                            print(f'        Run: chmod +x "{ffmpeg_path}"')
-                            print(f'        Or: xattr -d com.apple.quarantine "{ffmpeg_path}"')
-                else:
-                    print(f'        Warning: FFmpeg not found at: {ffmpeg_path}')
             
             stream = ffmpeg.input(file_path, hide_banner=None, y=None)
             
@@ -2454,10 +2463,18 @@ class Downloader:
             if any(indicator in error_str.lower() for indicator in [
                 'winerror 2', 'errno 2', 'no such file or directory', 
                 'het systeem kan het opgegeven bestand niet vinden',
-                'file not found', 'ffmpeg', 'executable not found'
+                'file not found', 'ffmpeg', 'executable not found',
+                'operation not permitted', 'permission denied'
             ]):
                 print(f'        ❌ Conversion error: FFmpeg was not found or is misconfigured. This is required for audio conversion.')
                 print(f'        💡 Solution: Install FFmpeg or set the path in Settings > Global > Advanced > FFmpeg Path')
+                import platform
+                if platform.system() == 'Darwin':
+                    print(f'        💡 macOS: If FFmpeg is blocked by Gatekeeper:')
+                    print(f'           1. Go to System Preferences > Security & Privacy > General')
+                    print(f'           2. Click "Allow Anyway" for ffmpeg')
+                    print(f'           3. Restart the app and try again')
+                    print(f'           Or install via Homebrew: brew install ffmpeg')
             else:
                 print(f'        ❌ Conversion error: {e}')
             return (file_path, None, None)  # Return tuple like old version
