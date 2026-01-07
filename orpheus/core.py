@@ -214,8 +214,14 @@ class Orpheus:
                     def __init__(self, message):
                         super().__init__(module + ' --> ' + str(message))
 
+                # Get settings with fallbacks to defaults for robustness on first run
+                global_settings = self.settings.get('global', {})
+                general_settings = global_settings.get('general', self.default_global_settings.get('general', {}))
+                advanced_settings = global_settings.get('advanced', self.default_global_settings.get('advanced', {}))
+                covers_settings = global_settings.get('covers', self.default_global_settings.get('covers', {}))
+                
                 module_controller = ModuleController(
-                    module_settings = self.settings['modules'][module] if module in self.settings['modules'] else {},
+                    module_settings = self.settings['modules'][module] if module in self.settings.get('modules', {}) else {},
                     data_folder = os.path.join(self.data_folder_base, 'modules', module),
                     extensions = self.extensions,
                     temporary_settings_controller = TemporarySettingsController(module, self.session_storage_location),
@@ -223,28 +229,28 @@ class Orpheus:
                     get_current_timestamp = true_current_utc_timestamp,
                     printer_controller = oprinter,
                     orpheus_options = OrpheusOptions(
-                        debug_mode = self.settings['global']['advanced']['debug_mode'],
-                        quality_tier = QualityEnum[self.settings['global']['general']['download_quality'].upper()],
-                        disable_subscription_check = self.settings['global']['advanced']['disable_subscription_checks'],
+                        debug_mode = advanced_settings.get('debug_mode', False),
+                        quality_tier = QualityEnum[general_settings.get('download_quality', 'hifi').upper()],
+                        disable_subscription_check = advanced_settings.get('disable_subscription_checks', False),
                         default_cover_options = CoverOptions(
-                            file_type = ImageFileTypeEnum[self.settings['global']['covers']['external_format']],
-                            resolution = self.settings['global']['covers']['main_resolution'],
-                            compression = CoverCompressionEnum[self.settings['global']['covers']['main_compression']]
+                            file_type = ImageFileTypeEnum[covers_settings.get('external_format', 'png')],
+                            resolution = covers_settings.get('main_resolution', 1400),
+                            compression = CoverCompressionEnum[covers_settings.get('main_compression', 'high')]
                         )
                     ),
                     gui_handlers = self.gui_handlers,
-                    progress_bar_enabled = self.settings['global']['general'].get('progress_bar', True)
+                    progress_bar_enabled = general_settings.get('progress_bar', True)
                 )
 
                 loaded_module = class_(module_controller)
                 self.loaded_modules[module] = loaded_module
 
                 # Check if module has settings
-                settings = self.settings['modules'][module] if module in self.settings['modules'] else {}
+                settings = self.settings.get('modules', {}).get(module, {})
                 temporary_session = read_temporary_setting(self.session_storage_location, module)
                 if self.module_settings[module].login_behaviour is ManualEnum.orpheus:
                     # Login if simple mode, username login and requested by update_setting_storage
-                    if temporary_session and temporary_session['clear_session'] and not self.settings['global']['advanced']['advanced_login_system']:
+                    if temporary_session and temporary_session['clear_session'] and not advanced_settings.get('advanced_login_system', False):
                         hashes = {k: hash_string(str(v)) for k, v in settings.items()}
                         if not temporary_session.get('hashes') or \
                             any(k not in hashes or hashes[k] != v for k,v in temporary_session['hashes'].items() if k in self.module_settings[module].session_settings):
