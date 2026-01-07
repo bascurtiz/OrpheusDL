@@ -2354,6 +2354,33 @@ class Downloader:
             import re
             import shutil
             
+            # Get custom ffmpeg path from settings
+            ffmpeg_path = self.global_settings.get('advanced', {}).get('ffmpeg_path', 'ffmpeg')
+            if not ffmpeg_path or ffmpeg_path.strip() == '':
+                ffmpeg_path = 'ffmpeg'
+            
+            # Debug: print the ffmpeg path being used
+            import platform
+            if self.global_settings.get('advanced', {}).get('debug_mode', False):
+                print(f'        [Debug] Using FFmpeg path: {ffmpeg_path}')
+            
+            # On macOS, check if custom ffmpeg path exists and is executable
+            if platform.system() == 'Darwin' and ffmpeg_path != 'ffmpeg':
+                if os.path.isfile(ffmpeg_path):
+                    if not os.access(ffmpeg_path, os.X_OK):
+                        # Try to make it executable
+                        try:
+                            import stat
+                            current_mode = os.stat(ffmpeg_path).st_mode
+                            os.chmod(ffmpeg_path, current_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+                            print(f'        [FFmpeg] Made executable: {ffmpeg_path}')
+                        except Exception as chmod_err:
+                            print(f'        Warning: FFmpeg at {ffmpeg_path} is not executable.')
+                            print(f'        Run: chmod +x "{ffmpeg_path}"')
+                            print(f'        Or: xattr -d com.apple.quarantine "{ffmpeg_path}"')
+                else:
+                    print(f'        Warning: FFmpeg not found at: {ffmpeg_path}')
+            
             stream = ffmpeg.input(file_path, hide_banner=None, y=None)
             
             try:
@@ -2376,7 +2403,7 @@ class Downloader:
                     vn=None,  # Ignore video stream (this is key!)
                     **conv_flags,
                     loglevel='error'
-                ).run(capture_stdout=True, capture_stderr=True)
+                ).run(cmd=ffmpeg_path, capture_stdout=True, capture_stderr=True)
             except Error as e:
                 error_msg = e.stderr.decode('utf-8')
                 # Handle experimental encoder fallback (from old version)
@@ -2389,7 +2416,7 @@ class Downloader:
                             vn=None,  # Ignore video stream here as well
                             **conv_flags,
                             loglevel='error'
-                        ).run(capture_stdout=True, capture_stderr=True)
+                        ).run(cmd=ffmpeg_path, capture_stdout=True, capture_stderr=True)
                     except Error as e2:
                         raise Exception(f'ffmpeg error converting to {ffmpeg_codec}:\n{e2.stderr.decode("utf-8")}')
                 else:
