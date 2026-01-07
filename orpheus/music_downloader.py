@@ -2470,11 +2470,12 @@ class Downloader:
                 print(f'        💡 Solution: Install FFmpeg or set the path in Settings > Global > Advanced > FFmpeg Path')
                 import platform
                 if platform.system() == 'Darwin':
-                    print(f'        💡 macOS: If FFmpeg is blocked by Gatekeeper:')
-                    print(f'           1. Go to System Preferences > Security & Privacy > General')
-                    print(f'           2. Click "Allow Anyway" for ffmpeg')
-                    print(f'           3. Restart the app and try again')
-                    print(f'           Or install via Homebrew: brew install ffmpeg')
+                    print(f'        💡 macOS: Install via Homebrew: brew install ffmpeg')
+                elif platform.system() == 'Linux':
+                    print(f'        💡 Linux: Install via package manager:')
+                    print(f'           Ubuntu/Debian: sudo apt install ffmpeg')
+                    print(f'           Fedora: sudo dnf install ffmpeg')
+                    print(f'           Arch: sudo pacman -S ffmpeg')
             else:
                 print(f'        ❌ Conversion error: {e}')
             return (file_path, None, None)  # Return tuple like old version
