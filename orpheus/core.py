@@ -390,9 +390,22 @@ class Orpheus:
             # Don't exit in GUI mode - just print the message and continue
             # The GUI will handle showing appropriate messages to the user
 
+    def get_merged_global_settings(self):
+        """Returns global settings merged with defaults to ensure all keys exist."""
+        merged = {}
+        current_global = self.settings.get('global', {})
+        for section_name, section_defaults in self.default_global_settings.items():
+            if isinstance(section_defaults, dict):
+                merged[section_name] = {**section_defaults, **current_global.get(section_name, {})}
+            else:
+                merged[section_name] = current_global.get(section_name, section_defaults)
+        return merged
+
 
 def orpheus_core_download(orpheus_session: Orpheus, media_to_download, third_party_modules, separate_download_module, output_path, use_ansi_colors=True):
-    downloader = Downloader(orpheus_session.settings['global'], orpheus_session.module_controls, oprinter, output_path, use_ansi_colors)
+    # Get global settings merged with defaults to ensure all required keys exist
+    global_settings = orpheus_session.get_merged_global_settings()
+    downloader = Downloader(global_settings, orpheus_session.module_controls, oprinter, output_path, use_ansi_colors)
     downloader.full_settings = orpheus_session.settings  # Add access to full settings including modules
     os.makedirs('temp', exist_ok=True)
 
