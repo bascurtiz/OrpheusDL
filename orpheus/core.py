@@ -180,7 +180,14 @@ class Orpheus:
                         if ModuleFlags.private in self.module_settings[constant].flags: duplicates.add(constant)
                     else:
                         duplicates.add(tuple(sorted([module, self.module_netloc_constants[constant]])))
-        if duplicates: raise Exception('Multiple modules installed that connect to the same service names: ' + ', '.join(' and '.join(duplicates)))
+        if duplicates:
+            duplicate_msgs = []
+            for d in duplicates:
+                if isinstance(d, (list, tuple)):
+                    duplicate_msgs.append(' and '.join(d))
+                else:
+                    duplicate_msgs.append(str(d))
+            raise Exception('Multiple modules installed that connect to the same service names: ' + ', '.join(duplicate_msgs))
 
         self.update_module_storage()
 
