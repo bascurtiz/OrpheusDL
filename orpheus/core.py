@@ -179,7 +179,7 @@ class Orpheus:
                     elif ModuleFlags.private in module_info.flags: # Replacing public modules with private ones
                         if ModuleFlags.private in self.module_settings[constant].flags: duplicates.add(constant)
                     else:
-                        duplicates.add(sorted([module, self.module_netloc_constants[constant]]))
+                        duplicates.add(tuple(sorted([module, self.module_netloc_constants[constant]])))
         if duplicates: raise Exception('Multiple modules installed that connect to the same service names: ' + ', '.join(' and '.join(duplicates)))
 
         self.update_module_storage()
