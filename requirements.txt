@@ -17,3 +17,6 @@ yt-dlp
 pyogg>=0.6.14a.1
 websocket-client>=1.8.0
 zeroconf>=0.146.4
+CTkToolTip
+customtkinter
+packaging
