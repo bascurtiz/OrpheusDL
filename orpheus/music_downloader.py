@@ -1821,20 +1821,49 @@ class Downloader:
         # Initialize header_drop_level with default value before try block (needed for exception handlers)
         header_drop_level = 1
 
-        # Get track info
-        try:
-            # Ensure extra_kwargs is always a dictionary
-            safe_extra_kwargs = extra_kwargs if extra_kwargs is not None else {}
-            track_info: TrackInfo = self.service.get_track_info(track_id, quality_tier, codec_options, **safe_extra_kwargs)
-        except Exception as e:
-            self.print(f'Could not get track info for {track_id}: {e}')
-            symbols = self._get_status_symbols()
-            d_print(f'=== {symbols["error"]} Track failed ===', drop_level=header_drop_level)
-            if isinstance(e, SpotifyRateLimitDetectedError):
-                return return_with_blank_line("RATE_LIMITED")
-            return return_with_blank_line(None)
+        # Get track info with retry mechanism for OAuth race conditions
+        # Sometimes the first request fails because OAuth authorization hasn't completed yet
+        max_retries = 3
+        retry_delay = 2  # seconds
+        track_info: TrackInfo = None
+        last_exception = None
+        
+        for attempt in range(max_retries):
+            try:
+                # Ensure extra_kwargs is always a dictionary
+                safe_extra_kwargs = extra_kwargs if extra_kwargs is not None else {}
+                track_info = self.service.get_track_info(track_id, quality_tier, codec_options, **safe_extra_kwargs)
+                
+                # If we got track info, break out of retry loop
+                if track_info is not None:
+                    break
+                    
+                # Track info is None - might be OAuth race condition, retry after delay
+                if attempt < max_retries - 1:
+                    import time
+                    self.print(f'Track info not available, retrying in {retry_delay}s... (attempt {attempt + 1}/{max_retries})')
+                    time.sleep(retry_delay)
+                    
+            except Exception as e:
+                last_exception = e
+                if isinstance(e, SpotifyRateLimitDetectedError):
+                    self.print(f'Could not get track info for {track_id}: {e}')
+                    symbols = self._get_status_symbols()
+                    d_print(f'=== {symbols["error"]} Track failed ===', drop_level=header_drop_level)
+                    return return_with_blank_line("RATE_LIMITED")
+                    
+                # For other exceptions, retry if we have attempts left
+                if attempt < max_retries - 1:
+                    import time
+                    self.print(f'Error getting track info, retrying in {retry_delay}s... (attempt {attempt + 1}/{max_retries})')
+                    time.sleep(retry_delay)
+                else:
+                    self.print(f'Could not get track info for {track_id}: {e}')
+                    symbols = self._get_status_symbols()
+                    d_print(f'=== {symbols["error"]} Track failed ===', drop_level=header_drop_level)
+                    return return_with_blank_line(None)
 
-        # Check if track_info is None (e.g., episode not found, track unavailable)
+        # Check if track_info is still None after all retries
         if track_info is None:
             self.print(f'Track info is None for {track_id}. Track may be unavailable or not found.')
             symbols = self._get_status_symbols()
