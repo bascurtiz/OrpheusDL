@@ -1818,6 +1818,9 @@ class Downloader:
             proprietary_codecs=self.global_settings['codecs']['proprietary_codecs'],
         )
 
+        # Initialize header_drop_level with default value before try block (needed for exception handlers)
+        header_drop_level = 1
+
         # Get track info
         try:
             # Ensure extra_kwargs is always a dictionary
