@@ -63,6 +63,7 @@ class ContainerEnum(Flag):
     ac4 = auto()
     ac3 = auto()
     mp4 = auto()
+    webm = auto()
 
 
 @dataclass

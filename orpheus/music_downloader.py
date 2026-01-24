@@ -53,7 +53,8 @@ PLATFORM_COLORS = {
     "kkbox": "\033[36m",         # Cyan (#27B1D8 -> cyan)
     "idagio": "\033[35m",        # Magenta (#5C34FE -> magenta)
     "bugs": "\033[31m",          # Red (#FF3B28 -> red)
-    "nugs": "\033[31m"           # Red (#C83B30 -> red)
+    "nugs": "\033[31m",          # Red (#C83B30 -> red)
+    "youtube": "\033[91m"        # Bright Red (YouTube Brand Color)
 }
 
 RESET_COLOR = "\033[0m"
@@ -195,6 +196,24 @@ class Downloader:
         except (KeyError, ValueError, TypeError):
             pass
         return 30  # Default fallback
+
+    def _get_youtube_pause_seconds(self):
+        """Get the YouTube pause duration from settings, with fallback to default"""
+        try:
+            if hasattr(self, 'full_settings') and self.full_settings and 'modules' in self.full_settings and 'youtube' in self.full_settings['modules']:
+                return int(self.full_settings['modules']['youtube'].get('download_pause_seconds', 5))
+        except (KeyError, ValueError, TypeError):
+            pass
+        return 5  # Default fallback
+
+    def _get_youtube_download_mode(self):
+        """Get the YouTube download mode from settings"""
+        try:
+            if hasattr(self, 'full_settings') and self.full_settings and 'modules' in self.full_settings and 'youtube' in self.full_settings['modules']:
+                return self.full_settings['modules']['youtube'].get('download_mode', 'sequential')
+        except (KeyError, ValueError, TypeError):
+            pass
+        return 'sequential'  # Default fallback
 
     def _get_status_symbols(self):
         """Get platform-appropriate status symbols with universal colors"""
@@ -720,6 +739,9 @@ class Downloader:
             elif service_name_lower == 'spotify':
                 force_sequential = True
                 sequential_reason = "Spotify (rate limiting protection)"
+            elif service_name_lower == 'youtube' and self._get_youtube_download_mode() == 'sequential':
+                force_sequential = True
+                sequential_reason = "YouTube (rate limiting protection)"
             elif service_name_lower == 'applemusic':
                 force_sequential = True
                 sequential_reason = "Apple Music"
@@ -788,11 +810,16 @@ class Downloader:
                         extra_kwargs=playlist_info.track_extra_kwargs
                     )
                     
-                    # Add pause between downloads for Spotify to prevent rate limiting
+                    # Add pause between downloads for Spotify/YouTube to prevent rate limiting
                     # Only pause if track was actually downloaded (not skipped) and not the last track
                     if (service_name_lower == 'spotify' and index < number_of_tracks and 
                         download_result is not None and download_result != "RATE_LIMITED"):
                         pause_seconds = self._get_spotify_pause_seconds()
+                        self.print(f'Pausing {pause_seconds} seconds to prevent rate limiting...', drop_level=1)
+                        time.sleep(pause_seconds)
+                    elif (service_name_lower == 'youtube' and index < number_of_tracks and 
+                        download_result is not None and download_result != "RATE_LIMITED"):
+                        pause_seconds = self._get_youtube_pause_seconds()
                         self.print(f'Pausing {pause_seconds} seconds to prevent rate limiting...', drop_level=1)
                         time.sleep(pause_seconds)
                     
@@ -1044,6 +1071,9 @@ class Downloader:
             elif service_name_lower == 'spotify':
                 force_sequential = True
                 sequential_reason = "Spotify (rate limiting protection)"
+            elif service_name_lower == 'youtube' and self._is_youtube_sequential_enabled():
+                force_sequential = True
+                sequential_reason = "YouTube (rate limiting protection)"
             elif service_name_lower == 'applemusic':
                 force_sequential = True
                 sequential_reason = "Apple Music"
@@ -1182,7 +1212,7 @@ class Downloader:
                         track_content_indent = 1
                     download_result = self.download_track(track_id_to_download, album_location=album_path, track_index=index, number_of_tracks=number_of_tracks, main_artist=artist_name, cover_temp_location=cover_temp_location, indent_level=track_content_indent, extra_kwargs=album_info.track_extra_kwargs)
                     
-                    # Add pause between downloads for Spotify to prevent rate limiting
+                    # Add pause between downloads for Spotify/YouTube to prevent rate limiting
                     # Only pause if track was actually downloaded (not skipped) and not the last track
                     if (service_name_lower == 'spotify' and index < number_of_tracks and 
                         download_result is not None and download_result != "RATE_LIMITED"):
@@ -1190,6 +1220,12 @@ class Downloader:
                         self.print(f'Pausing {pause_seconds} seconds to prevent rate limiting...', drop_level=1)
                         time.sleep(pause_seconds)
                         print()  # Add blank line after pause message for consistent spacing with playlists
+                    elif (service_name_lower == 'youtube' and index < number_of_tracks and 
+                        download_result is not None and download_result != "RATE_LIMITED"):
+                        pause_seconds = self._get_youtube_pause_seconds()
+                        self.print(f'Pausing {pause_seconds} seconds to prevent rate limiting...', drop_level=1)
+                        time.sleep(pause_seconds)
+                        print()  # Add blank line after pause message for consistent spacing
                     
                     # Collect rate-limited tracks for retry
                     if download_result == "RATE_LIMITED":
@@ -1392,6 +1428,10 @@ class Downloader:
                 concurrent_downloads = 1
                 print()  # Add blank line before sequential downloads message
                 self.print("Using sequential downloads for Spotify (rate limiting protection)", drop_level=1)
+            elif service_name_lower == 'youtube' and self._get_youtube_download_mode() == 'sequential':
+                concurrent_downloads = 1
+                print()  # Add blank line before sequential downloads message
+                self.print("Using sequential downloads for YouTube (rate limiting protection)", drop_level=1)
             elif service_name_lower == 'applemusic':
                 concurrent_downloads = 1
                 print()  # Add blank line before sequential downloads message
@@ -1470,11 +1510,17 @@ class Downloader:
                     self.print(f'Track {index}/{number_of_tracks_new}{pass_indicator}', drop_level=1)
                     download_result = self.download_track(track_id, album_location=artist_path, main_artist=artist_name, number_of_tracks=1, indent_level=1, extra_kwargs=artist_info.track_extra_kwargs)
                     
-                    # Add pause between downloads for Spotify to prevent rate limiting
+                    # Add pause between downloads for Spotify/YouTube to prevent rate limiting
                     # Only pause if track was actually downloaded (not skipped) and not the last track
                     if (service_name_lower == 'spotify' and index < number_of_tracks_new and 
                         download_result is not None and download_result != "RATE_LIMITED"):
                         pause_seconds = self._get_spotify_pause_seconds()
+                        self.print(f'Pausing {pause_seconds} seconds to prevent rate limiting...', drop_level=1)
+                        time.sleep(pause_seconds)
+                        print()  # Add blank line after pause message for consistent spacing
+                    elif (service_name_lower == 'youtube' and index < number_of_tracks_new and 
+                        download_result is not None and download_result != "RATE_LIMITED"):
+                        pause_seconds = self._get_youtube_pause_seconds()
                         self.print(f'Pausing {pause_seconds} seconds to prevent rate limiting...', drop_level=1)
                         time.sleep(pause_seconds)
                         print()  # Add blank line after pause message for consistent spacing
@@ -1704,7 +1750,8 @@ class Downloader:
                 '.aiff': ContainerEnum.aiff,
                 '.ac4': ContainerEnum.ac4,
                 '.ac3': ContainerEnum.ac3,
-                '.eac3': ContainerEnum.eac3
+                '.eac3': ContainerEnum.eac3,
+                '.webm': ContainerEnum.webm
             }
             container = container_map.get(file_extension, ContainerEnum.flac)
             
@@ -1716,7 +1763,7 @@ class Downloader:
             credits_list = []
             
             # Check if container supports tagging
-            tagging_supported_containers = [ContainerEnum.flac, ContainerEnum.mp3, ContainerEnum.m4a, ContainerEnum.ogg]
+            tagging_supported_containers = [ContainerEnum.flac, ContainerEnum.mp3, ContainerEnum.m4a, ContainerEnum.ogg, ContainerEnum.opus, ContainerEnum.webm]
             
             if container in tagging_supported_containers:
                 # Tag the converted file - only pass artwork_path if embed_cover is enabled
@@ -1934,11 +1981,15 @@ class Downloader:
                 codec_info.append('Codec: VORBIS')
 
                 # Determine bitrate based on quality setting
+                # Spotify: hifi=320kbps, high=160kbps, low=96kbps
+                # With button remapping: "High Quality" -> hifi (320), "Low Quality" -> high (160)
                 quality_setting = self.global_settings['general']['download_quality'].lower()
-                if quality_setting in ['lossless', 'hifi', 'high']:
+                if quality_setting in ['lossless', 'hifi']:
                     codec_info.append('bitrate: 320kbps')
-                else:  # low quality
+                elif quality_setting == 'high':
                     codec_info.append('bitrate: 160kbps')
+                else:  # low quality
+                    codec_info.append('bitrate: 96kbps')
 
                 # Standard values for Spotify
                 codec_info.append('bit depth: 16bit')
@@ -2245,7 +2296,8 @@ class Downloader:
                 '.aiff': ContainerEnum.aiff,
                 '.ac4': ContainerEnum.ac4,
                 '.ac3': ContainerEnum.ac3,
-                '.eac3': ContainerEnum.eac3
+                '.eac3': ContainerEnum.eac3,
+                '.webm': ContainerEnum.webm
             }
             container = container_map.get(file_extension, ContainerEnum.flac)
             
@@ -2257,7 +2309,7 @@ class Downloader:
             credits_list = []
             
             # Check if container supports tagging
-            tagging_supported_containers = [ContainerEnum.flac, ContainerEnum.mp3, ContainerEnum.m4a, ContainerEnum.ogg]
+            tagging_supported_containers = [ContainerEnum.flac, ContainerEnum.mp3, ContainerEnum.m4a, ContainerEnum.ogg, ContainerEnum.opus, ContainerEnum.webm]
             
             if container in tagging_supported_containers:
                 # Tag the converted file - only pass artwork_path if embed_cover is enabled
@@ -2484,7 +2536,7 @@ class Downloader:
             else:
                 silentremove(file_path)
             
-            print(f'        ✅ Conversion completed: {new_track_location}')
+            print(f'        ✅ Conversion completed: {os.path.basename(new_track_location)}')
             
             # Return tuple: (new_location, old_location_if_kept, old_container_if_kept)
             return (new_track_location, old_track_location, old_container)

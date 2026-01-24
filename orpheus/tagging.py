@@ -15,6 +15,7 @@ from mutagen.mp4 import MP4Tags
 from mutagen.oggopus import OggOpus
 from mutagen.oggvorbis import OggVorbis
 from mutagen.oggvorbis import OggVorbisHeaderError
+import mutagen
 
 from utils.exceptions import *
 from utils.models import ContainerEnum, TrackInfo
@@ -96,6 +97,11 @@ def tag_file(file_path: str, image_path: str, track_info: TrackInfo, credits_lis
         tagger.RegisterTextKey('explicit', 'rtng') if track_info.explicit is not None else None
         tagger.RegisterTextKey('covr', 'covr')
         tagger.RegisterTextKey('lyrics', '\xa9lyr') if embedded_lyrics else None
+    elif container == ContainerEnum.webm:
+        tagger = mutagen.File(file_path)
+        if tagger is None:
+            # If mutagen fails to identify it, we can't tag it easily without matroska support
+            raise Exception('Mutagen could not identify WebM file for tagging. Consider converting to Opus/Ogg.')
     else:
         raise Exception('Unknown container for tagging')
 
@@ -161,7 +167,7 @@ def tag_file(file_path: str, image_path: str, track_info: TrackInfo, credits_lis
 
     # add the label tag
     if track_info.tags.label:
-        if container in {ContainerEnum.flac, ContainerEnum.ogg}:
+        if container in {ContainerEnum.flac, ContainerEnum.ogg, ContainerEnum.webm}:
             tagger['Label'] = track_info.tags.label
         elif container == ContainerEnum.mp3:
             tagger.tags._EasyID3__id3._DictProxy__dict['TPUB'] = TPUB(
@@ -192,7 +198,7 @@ def tag_file(file_path: str, image_path: str, track_info: TrackInfo, credits_lis
             )
 
     # add all extra_kwargs key value pairs to the (FLAC, Vorbis) file
-    if container in {ContainerEnum.flac, ContainerEnum.ogg}:
+    if container in {ContainerEnum.flac, ContainerEnum.ogg, ContainerEnum.webm}:
         for key, value in track_info.tags.extra_tags.items():
             tagger[key] = value
     elif container is ContainerEnum.m4a:
@@ -317,15 +323,20 @@ def tag_file(file_path: str, image_path: str, track_info: TrackInfo, credits_lis
             # Remove cover art from Ogg/Opus file
             if 'metadata_block_picture' in tagger:
                 del tagger['metadata_block_picture']
+        elif container == ContainerEnum.webm:
+            # Matroska cover art removal (attachments)
+            # This is complex in mutagen, often attachments are separate. 
+            # For now, we might skip clearing if it's too complex, or just rely on overwriting.
+            pass
 
     try:
         tagger.save(file_path, v1=2, v2_version=3, v23_sep=None) if container == ContainerEnum.mp3 else tagger.save()
     except OggVorbisHeaderError as ogg_header_error:
         # Check if it's the specific "unable to read full header" error for Ogg Vorbis
         if "unable to read full header" in str(ogg_header_error).lower():
-            logging.warning(f"Ignoring mutagen OggVorbisHeaderError ('unable to read full header') for {file_path}. File might be okay.")
-            # We pass silently, assuming the file is usable as per your observation.
-            # This prevents TagSavingFailure and the fallback _tags.txt.
+            logging.warning(f"Mutagen OggVorbisHeaderError ('unable to read full header') for {file_path}. Metadata might be missing or incomplete.")
+            # We don't raise TagSavingFailure here to allow the process to continue, 
+            # but we log it as a warning since the user reported missing metadata.
         else:
             # It's a different OggVorbisHeaderError, so proceed with the original fallback.
             logging.error(f"Tagging failed for {file_path} with OggVorbisHeaderError: {ogg_header_error}", exc_info=True)
