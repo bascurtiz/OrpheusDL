@@ -261,13 +261,16 @@ class Orpheus:
                         hashes = {k: hash_string(str(v)) for k, v in settings.items()}
                         if not temporary_session.get('hashes') or \
                             any(k not in hashes or hashes[k] != v for k,v in temporary_session['hashes'].items() if k in self.module_settings[module].session_settings):
-                            print('Logging into ' + self.module_settings[module].service_name)
-                            try:
-                                loaded_module.login(settings['email'] if 'email' in settings else settings['username'], settings['password'])
-                            except:
-                                set_temporary_setting(self.session_storage_location, module, 'hashes', None, {})
-                                raise
-                            set_temporary_setting(self.session_storage_location, module, 'hashes', None, hashes)
+                            username_or_email = (settings.get('email') or settings.get('username') or '').strip()
+                            password = (settings.get('password') or '').strip()
+                            if username_or_email and password:
+                                print('Logging into ' + self.module_settings[module].service_name)
+                                try:
+                                    loaded_module.login(settings['email'] if 'email' in settings else settings['username'], settings['password'])
+                                except:
+                                    set_temporary_setting(self.session_storage_location, module, 'hashes', None, {})
+                                    raise
+                                set_temporary_setting(self.session_storage_location, module, 'hashes', None, hashes)
                     if ModuleFlags.enable_jwt_system in self.module_settings[module].flags and temporary_session and \
                             temporary_session['refresh'] and not temporary_session['bearer']:
                         loaded_module.refresh_login()
