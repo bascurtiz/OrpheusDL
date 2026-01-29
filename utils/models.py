@@ -75,6 +75,7 @@ class SearchResult:
     explicit: Optional[bool] = False
     duration: Optional[int] = None  # Duration in whole seconds
     image_url: Optional[str] = None
+    preview_url: Optional[str] = None  # URL to audio preview (e.g., 30-second snippet)
     additional: Optional[list] = None
     extra_kwargs: Optional[dict] = field(default_factory=dict)
 
