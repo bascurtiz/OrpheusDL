@@ -146,8 +146,10 @@ class Orpheus:
                     raise Exception('Error loading extension: "{extension}"')
 
         # Module preparation (not loaded yet for performance purposes)
+        # Modules in this set are skipped during discovery (e.g. deprecated/removed but folder may remain on macOS upgrades)
+        modules_ignored = {'jiosaavn'}
         os.makedirs('modules', exist_ok=True)
-        module_list = [module.lower() for module in os.listdir('modules') if os.path.exists(f'modules/{module}/interface.py')]
+        module_list = [m.lower() for m in os.listdir('modules') if m.lower() not in modules_ignored and os.path.exists(f'modules/{m}/interface.py')]
         if not module_list or module_list == ['example']:
             raise Exception('No modules are installed. Please install at least one module in the modules folder.')
         logging.debug('Orpheus: Modules detected: ' + ", ".join(module_list))
