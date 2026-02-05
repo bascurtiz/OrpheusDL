@@ -1917,6 +1917,14 @@ class Downloader:
             d_print(f'=== {symbols["error"]} Track failed ===', drop_level=header_drop_level)
             return return_with_blank_line(None)
 
+        # Check if the service reported the track as unavailable (e.g. geo-restricted, not streamable)
+        track_error = getattr(track_info, 'error', None)
+        if track_error and isinstance(track_error, str) and track_error.strip():
+            self.print(f'Track unavailable: {track_error}')
+            symbols = self._get_status_symbols()
+            d_print(f'=== {symbols["error"]} Track failed ===', drop_level=header_drop_level)
+            return return_with_blank_line(None)
+
         # For single track downloads, use no indentation for headers but keep indentation for details
         # For multi-track contexts (albums, playlists, artists), use drop_level=1 to align with "Track X/Y" line
         # For single-track albums within artist downloads, use drop_level to remove all indentation
