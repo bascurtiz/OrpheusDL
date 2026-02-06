@@ -191,6 +191,7 @@ class DownloadTypeEnum(Flag):
     playlist = auto()
     artist = auto()
     album = auto()
+    label = auto()
 
 
 @dataclass
@@ -374,6 +375,7 @@ class TrackInfo:
     credits_extra_kwargs: Optional[dict] = field(default_factory=dict)
     lyrics_extra_kwargs: Optional[dict] = field(default_factory=dict)
     error: Optional[str] = None
+    preview_url: Optional[str] = None  # URL to audio preview (e.g. Beatport/Beatsource sample)
 
 
 @dataclass

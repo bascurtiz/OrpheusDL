@@ -2,7 +2,7 @@ import logging, os
 import shutil
 import unicodedata
 from dataclasses import asdict
-from time import strftime, gmtime
+from time import gmtime
 import json
 from enum import Enum
 import uuid
@@ -77,16 +77,11 @@ def get_colored_platform_name(service_name):
         return service_name
 
 def beauty_format_seconds(seconds: int) -> str:
+    # Under 1 hour: M:SS (e.g. 3:34). 1 hour or more: H:MM:SS (e.g. 1:14:03).
     time_data = gmtime(seconds)
-
-    time_format = "%Mm:%Ss"
-    # if seconds are higher than 3600s also add the hour format
     if time_data.tm_hour > 0:
-        time_format = "%Hh:" + time_format
-    # TODO: also add days to time_format if hours > 24?
-
-    # return the formatted time string
-    return strftime(time_format, time_data)
+        return f"{time_data.tm_hour}:{time_data.tm_min:02d}:{time_data.tm_sec:02d}"
+    return f"{time_data.tm_min}:{time_data.tm_sec:02d}"
 
 
 def simplify_error_message(error_str: str) -> str:
@@ -1568,6 +1563,82 @@ class Downloader:
         symbols = self._get_status_symbols()
         self.print(f'=== {symbols["success"]} Artist completed ===', drop_level=1)
         # Add 2 empty lines after artist completion for visual separation
+        print()
+        print()
+
+    def download_label(self, label_id, extra_kwargs=None):
+        """Download all releases and tracks for a label (Beatport/Beatsource). Uses same flow as artist."""
+        prepared_kwargs = {}
+        if extra_kwargs:
+            prepared_kwargs.update(extra_kwargs)
+
+        if not hasattr(self.service, 'get_label_info'):
+            self.print(f"Label downloads are not supported for {self.service_name}.", drop_level=1)
+            symbols = self._get_status_symbols()
+            self.print(f"=== {symbols['error']} Label failed ===", drop_level=1)
+            return
+
+        try:
+            label_info: ArtistInfo = self.service.get_label_info(label_id, **prepared_kwargs)
+        except Exception as e:
+            self.print(f"Failed to retrieve label info for ID {label_id}: {e}", drop_level=1)
+            symbols = self._get_status_symbols()
+            self.print(f"=== {symbols['error']} Label failed ===", drop_level=1)
+            return
+
+        if label_info is None:
+            self.print(f"Failed to retrieve label info for ID {label_id}: Service returned None", drop_level=1)
+            symbols = self._get_status_symbols()
+            self.print(f"=== {symbols['error']} Label failed ===", drop_level=1)
+            return
+
+        label_name = label_info.name
+        number_of_albums = len(label_info.albums or [])
+        number_of_tracks = len(label_info.tracks or [])
+        symbols = self._get_status_symbols()
+
+        self.set_indent_number(1)
+        self.print(f'=== Downloading label {label_name} ({label_id}) ===', drop_level=1)
+        if number_of_albums:
+            self.print(f'Number of releases: {number_of_albums!s}')
+        if number_of_tracks:
+            self.print(f'Number of tracks: {number_of_tracks!s}')
+        colored_platform = get_colored_platform_name(self.module_settings[self.service_name].service_name)
+        self.print(f'Platform: {colored_platform}')
+        label_path = os.path.join(self.path, sanitise_name(label_name)) + '/'
+        os.makedirs(label_path, exist_ok=True)
+
+        tracks_downloaded = []
+        for index, album_item in enumerate(label_info.albums or [], start=1):
+            self.set_indent_number(1)
+            self.print(f'Release {index}/{number_of_albums}')
+            album_id_to_process = str(album_item) if isinstance(album_item, (str, int)) else (album_item.get('id') if isinstance(album_item, dict) else None)
+            if not album_id_to_process:
+                continue
+            tracks_downloaded += self.download_album(
+                album_id_to_process,
+                artist_name=label_name,
+                path=label_path,
+                indent_level=2,
+                extra_kwargs=label_info.album_extra_kwargs or {}
+            )
+
+        self.set_indent_number(2)
+        skip_tracks = self.global_settings.get('artist_downloading', {}).get('separate_tracks_skip_downloaded', True)
+        tracks_to_download = [i for i in (label_info.tracks or []) if (i not in tracks_downloaded and skip_tracks) or not skip_tracks]
+        number_of_tracks_new = len(tracks_to_download)
+
+        if number_of_tracks_new > 0:
+            for index, track_id in enumerate(tracks_to_download, start=1):
+                print()
+                self.print(f'Track {index}/{number_of_tracks_new}', drop_level=1)
+                self.download_track(track_id, album_location=label_path, main_artist=label_name, number_of_tracks=1, indent_level=1, extra_kwargs=label_info.track_extra_kwargs or {})
+
+        self.set_indent_number(1)
+        tracks_skipped = number_of_tracks - number_of_tracks_new
+        if tracks_skipped > 0:
+            self.print(f'Tracks skipped: {tracks_skipped!s}', drop_level=1)
+        self.print(f'=== {symbols["success"]} Label completed ===', drop_level=1)
         print()
         print()
 
