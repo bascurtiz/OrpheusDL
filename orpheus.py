@@ -84,8 +84,7 @@ def main():
     
     help_ = 'Use "settings [option]" for orpheus controls (coreupdate, fullupdate, modinstall), "settings [module]' \
            '[option]" for module specific options (update, test, setup), searching by "[search/luckysearch] [module]' \
-           '[track/artist/playlist/album] [query]", or just putting in urls. (you may need to wrap the URLs in double' \
-           'quotes if you have issues downloading)'
+           '[track/artist/playlist/album] [query]", or just putting in URLs. On zsh/macOS, wrap URLs in quotes to avoid "no matches found" (e.g. \'https://...?v=...\').'
     parser = argparse.ArgumentParser(description='Orpheus: modular music archival')
     parser.add_argument('-p', '--private', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('-o', '--output', help='Select a download output path. Default is the provided download path in config/settings.py')
