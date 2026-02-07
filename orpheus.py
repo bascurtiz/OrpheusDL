@@ -304,10 +304,12 @@ if __name__ == "__main__":
             print(f'\nSpotify Authentication Error: {e}')
             print('Please try the command again. If the issue persists, you may need to check your Spotify credentials or network connection.')
             exit(1) # Exit with a non-zero code to indicate an error
+        # Module credential messages (e.g. Qobuz): show message only, like Spotify
+        err_str = str(e)
+        if err_str and "credentials are missing" in err_str and "settings.json" in err_str:
+            print(f'\n{e}')
+            exit(1)
         # Catch-all for other exceptions
-        # For general exceptions, print the traceback if it's useful for debugging.
-        # For a cleaner user experience for non-dev users, you might choose to print a simpler message.
-        # For now, let's keep the traceback for general errors.
         import traceback
         print("\nAn unexpected error occurred:")
         traceback.print_exc()
