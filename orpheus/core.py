@@ -258,7 +258,7 @@ class Orpheus:
                 settings = self.settings.get('modules', {}).get(module, {})
                 temporary_session = read_temporary_setting(self.session_storage_location, module)
                 if self.module_settings[module].login_behaviour is ManualEnum.orpheus:
-                    # Login if simple mode, username login and requested by update_setting_storage
+                    # Login if simple mode (email or username + password) when requested by update_setting_storage
                     if temporary_session and temporary_session['clear_session'] and not advanced_settings.get('advanced_login_system', False):
                         hashes = {k: hash_string(str(v)) for k, v in settings.items()}
                         if not temporary_session.get('hashes') or \
