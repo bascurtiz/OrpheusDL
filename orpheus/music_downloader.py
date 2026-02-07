@@ -181,6 +181,50 @@ class Downloader:
         self.print = self.oprinter.oprint
         self.set_indent_number = self.oprinter.set_indent_number
 
+    def _is_auth_or_credentials_error(self, exc):
+        """True if the exception is auth/credentials-related (retrying would not help)."""
+        if isinstance(exc, AuthenticationError):
+            return True
+        err_str = str(exc).lower()
+        if 'credentials are missing' in err_str or 'cookies.txt' in err_str:
+            return True
+        if 'not authenticated' in err_str or ('authentication' in err_str and 'required' in err_str):
+            return True
+        if 'credentials are required' in err_str:
+            return True
+        return False
+
+    def _service_key(self):
+        """Normalized service name for error messages (e.g. 'applemusic', 'deezer')."""
+        return (self.service_name or '').lower().replace(' ', '') if hasattr(self, 'service_name') and self.service_name else 'service'
+
+    def _print_info_error_and_fail(self, info_type, resource_id, exc_or_message, failed_entity, drop_level=1):
+        """Print streamlined 'Could not get X info for id: service --> message' and then '=== x Entity failed ==='."""
+        symbols = self._get_status_symbols()
+        service_key = self._service_key()
+        msg = str(exc_or_message).strip()
+        if service_key != 'service':
+            self.print(f'Could not get {info_type} info for {resource_id}: {service_key} --> {msg}', drop_level=drop_level)
+        else:
+            self.print(f'Could not get {info_type} info for {resource_id}: {msg}', drop_level=drop_level)
+        self.print(f'=== {symbols["error"]} {failed_entity} failed ===', drop_level=drop_level)
+
+    def _ensure_can_download_or_abort(self, info_type, resource_id, failed_entity):
+        """If the service has ensure_can_download(), call it. On auth/credentials error, print and return False; else return True. Re-raise other errors."""
+        ensure_fn = getattr(self.service, 'ensure_can_download', None)
+        if not callable(ensure_fn):
+            return True
+        try:
+            ensure_fn()
+            return True
+        except Exception as e:
+            if isinstance(e, SpotifyConfigError):
+                raise
+            if self._is_auth_or_credentials_error(e):
+                self._print_info_error_and_fail(info_type, resource_id, e, failed_entity, drop_level=1)
+                return False
+            raise
+
     def _get_spotify_pause_seconds(self):
         """Get the Spotify pause duration from settings, with fallback to default"""
         try:
@@ -620,11 +664,26 @@ class Downloader:
                 logging.debug(f"Removing 'data' from extra_kwargs for {self.service_name}.get_playlist_info as it is unexpected.")
                 kwargs_for_playlist_info.pop('data', None)
 
-        playlist_info: PlaylistInfo = self.service.get_playlist_info(playlist_id, **kwargs_for_playlist_info)
+        try:
+            playlist_info: PlaylistInfo = self.service.get_playlist_info(playlist_id, **kwargs_for_playlist_info)
+        except Exception as e:
+            if isinstance(e, SpotifyConfigError):
+                raise
+            if self._is_auth_or_credentials_error(e):
+                self._print_info_error_and_fail('playlist', playlist_id, e, 'Playlist', drop_level=1)
+            else:
+                self.print(f'Could not get playlist info for {playlist_id}: {e}', drop_level=1)
+                symbols = self._get_status_symbols()
+                self.print(f'=== {symbols["error"]} Playlist failed ===', drop_level=1)
+            return []
+
         if not playlist_info:
             logging.warning(f"Could not retrieve playlist info for {playlist_id} from {self.service_name}. Skipping playlist.")
             return []
-        
+
+        if not self._ensure_can_download_or_abort('playlist', playlist_id, 'Playlist'):
+            return []
+
         self.print(f'=== Downloading playlist {playlist_info.name} ({playlist_id}) ===', drop_level=1)
         self.print(f'Playlist creator: {playlist_info.creator}' + (f' ({playlist_info.creator_id})' if playlist_info.creator_id else ''))
         if playlist_info.release_year: self.print(f'Playlist creation year: {playlist_info.release_year}')
@@ -1011,13 +1070,27 @@ class Downloader:
         # Get album info - use indent level 1 to match album details
         self.set_indent_number(1)
         self.print(f'Fetching data. Please wait...')
-        album_info: AlbumInfo = self.service.get_album_info(album_id, **(extra_kwargs or {}))
+        try:
+            album_info: AlbumInfo = self.service.get_album_info(album_id, **(extra_kwargs or {}))
+        except Exception as e:
+            if isinstance(e, SpotifyConfigError):
+                raise
+            if self._is_auth_or_credentials_error(e):
+                self._print_info_error_and_fail('album', album_id, e, 'Album', drop_level=1)
+            else:
+                self.print(f'Could not get album info for {album_id}: {e}', drop_level=1)
+                symbols = self._get_status_symbols()
+                self.print(f'=== {symbols["error"]} Album failed ===', drop_level=1)
+            return []
 
         if not album_info:
             logging.warning(f"Could not retrieve album info for {album_id} from {self.service_name}. Skipping album.")
             return []
-        
+
         number_of_tracks = len(album_info.tracks)
+        if not self._ensure_can_download_or_abort('album', album_id, 'Album'):
+            return []
+
         path = self.path if not path else path
 
         if number_of_tracks > 1 or self.global_settings['formatting']['force_album_format']:
@@ -1346,16 +1419,24 @@ class Downloader:
         except Exception as e:
             if isinstance(e, SpotifyConfigError):
                 raise
-            self.print(f"Failed to retrieve artist info for ID {artist_id}: {e}", drop_level=1)
-            symbols = self._get_status_symbols()
-            self.print(f"=== {symbols['error']} Artist failed ===", drop_level=1)
+            if self._is_auth_or_credentials_error(e):
+                self._print_info_error_and_fail('artist', artist_id, e, 'Artist', drop_level=1)
+            else:
+                self.print(f'Could not get artist info for {artist_id}: {self._service_key()} --> {e}', drop_level=1)
+                symbols = self._get_status_symbols()
+                self.print(f"=== {symbols['error']} Artist failed ===", drop_level=1)
             return
 
-        # Check if artist_info is None (some services may return None instead of raising an exception)
+        # Check if artist_info is None (some services return None instead of raising, e.g. Spotify when not authenticated)
         if artist_info is None:
-            self.print(f"Failed to retrieve artist info for ID {artist_id}: Service returned None", drop_level=1)
-            symbols = self._get_status_symbols()
-            self.print(f"=== {symbols['error']} Artist failed ===", drop_level=1)
+            self._print_info_error_and_fail(
+                'artist', artist_id,
+                'Service returned no data. Check credentials in Settings.',
+                'Artist', drop_level=1
+            )
+            return
+
+        if not self._ensure_can_download_or_abort('artist', artist_id, 'Artist'):
             return
 
         artist_name = artist_info.name
@@ -1587,9 +1668,11 @@ class Downloader:
             return
 
         if label_info is None:
-            self.print(f"Failed to retrieve label info for ID {label_id}: Service returned None", drop_level=1)
-            symbols = self._get_status_symbols()
-            self.print(f"=== {symbols['error']} Label failed ===", drop_level=1)
+            self._print_info_error_and_fail(
+                'label', label_id,
+                'Service returned no data. Check credentials in Settings.',
+                'Label', drop_level=1
+            )
             return
 
         label_name = label_info.name
@@ -1941,27 +2024,27 @@ class Downloader:
 
         # Get track info with retry mechanism for OAuth race conditions
         # Sometimes the first request fails because OAuth authorization hasn't completed yet
+        # Auth/credentials errors are not retried - fail immediately with clear message
         max_retries = 3
         retry_delay = 2  # seconds
         track_info: TrackInfo = None
         last_exception = None
-        
+
         for attempt in range(max_retries):
             try:
                 # Ensure extra_kwargs is always a dictionary
                 safe_extra_kwargs = extra_kwargs if extra_kwargs is not None else {}
                 track_info = self.service.get_track_info(track_id, quality_tier, codec_options, **safe_extra_kwargs)
-                
+
                 # If we got track info, break out of retry loop
                 if track_info is not None:
                     break
-                    
+
                 # Track info is None - might be OAuth race condition, retry after delay
                 if attempt < max_retries - 1:
-                    import time
                     self.print(f'Track info not available, retrying in {retry_delay}s... (attempt {attempt + 1}/{max_retries})')
                     time.sleep(retry_delay)
-                    
+
             except Exception as e:
                 last_exception = e
                 if isinstance(e, SpotifyConfigError):
@@ -1971,14 +2054,20 @@ class Downloader:
                     symbols = self._get_status_symbols()
                     d_print(f'=== {symbols["error"]} Track failed ===', drop_level=header_drop_level)
                     return return_with_blank_line("RATE_LIMITED")
-                    
+
+                # Auth/credentials errors: do not retry, show message immediately
+                if self._is_auth_or_credentials_error(e):
+                    self.print(f'Could not get track info for {track_id}: {self._service_key()} --> {e}')
+                    symbols = self._get_status_symbols()
+                    d_print(f'=== {symbols["error"]} Track failed ===', drop_level=header_drop_level)
+                    return return_with_blank_line(None)
+
                 # For other exceptions, retry if we have attempts left
                 if attempt < max_retries - 1:
-                    import time
                     self.print(f'Error getting track info, retrying in {retry_delay}s... (attempt {attempt + 1}/{max_retries})')
                     time.sleep(retry_delay)
                 else:
-                    self.print(f'Could not get track info for {track_id}: {e}')
+                    self.print(f'Could not get track info for {track_id}: {self._service_key()} --> {e}')
                     symbols = self._get_status_symbols()
                     d_print(f'=== {symbols["error"]} Track failed ===', drop_level=header_drop_level)
                     return return_with_blank_line(None)
@@ -1990,10 +2079,19 @@ class Downloader:
             d_print(f'=== {symbols["error"]} Track failed ===', drop_level=header_drop_level)
             return return_with_blank_line(None)
 
-        # Check if the service reported the track as unavailable (e.g. geo-restricted, not streamable)
+        # Check if the service reported the track as unavailable (e.g. geo-restricted, credentials missing)
         track_error = getattr(track_info, 'error', None)
         if track_error and isinstance(track_error, str) and track_error.strip():
-            self.print(f'Track unavailable: {track_error}')
+            err_lower = track_error.lower()
+            is_credentials_error = (
+                'credentials are missing' in err_lower or 'login required' in err_lower
+                or 'cookies.txt' in err_lower or 'credentials are required' in err_lower
+            )
+            service_key = self._service_key()
+            if is_credentials_error and service_key != 'service':
+                self.print(f'Could not get track info for {track_id}: {service_key} --> {track_error}')
+            else:
+                self.print(f'Track unavailable: {track_error}')
             symbols = self._get_status_symbols()
             d_print(f'=== {symbols["error"]} Track failed ===', drop_level=header_drop_level)
             return return_with_blank_line(None)

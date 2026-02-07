@@ -180,7 +180,8 @@ def main():
                     print("Searching... Please wait.")
                     items = module.search(query_type, query, limit = (1 if lucky_mode else orpheus.settings['global']['general']['search_limit']))
                     if len(items) == 0:
-                        raise Exception(f'No search results for {query_type.name}: {query}')
+                        print(f'\nNo search results for {query_type.name}: {query}')
+                        exit(1)
 
                     if lucky_mode:
                         selection = 0
@@ -322,11 +323,19 @@ if __name__ == "__main__":
             print(f'\nSpotify Authentication Error: {e}')
             print('Please try the command again. If the issue persists, you may need to check your Spotify credentials or network connection.')
             exit(1) # Exit with a non-zero code to indicate an error
-        # Module credential messages (e.g. Qobuz): show message only, like Spotify
+        # Module credential/config messages: show message only, no traceback (search + download, all types)
         err_str = str(e)
-        if err_str and "credentials are missing" in err_str and "settings.json" in err_str:
-            print(f'\n{e}')
-            exit(1)
+        err_lower = err_str.lower()
+        if err_str:
+            if "credentials are missing" in err_lower and "settings.json" in err_lower:
+                print(f'\n{e}')
+                exit(1)
+            if "credentials are required" in err_lower:
+                print(f'\n{e}')
+                exit(1)
+            if " --> " in err_str and ("credentials" in err_lower or "cookies" in err_lower or "settings.json" in err_str):
+                print(f'\n{e}')
+                exit(1)
         # User-facing guidance (e.g. no modules installed): show message only, no traceback
         if err_str and "No modules are installed" in err_str:
             print(f'\n{e}')
