@@ -12,6 +12,7 @@ protobuf>=6.33.0,<7
 pkce>=1.0.3
 pywidevine
 yt-dlp[default]
+yt-dlp-ejs
 # Dependencies for vendored librespot (Spotify module)
 # Note: protobuf is excluded - we use PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION='python' instead
 pyogg>=0.6.14a.1
