@@ -309,6 +309,10 @@ if __name__ == "__main__":
         if err_str and "credentials are missing" in err_str and "settings.json" in err_str:
             print(f'\n{e}')
             exit(1)
+        # User-facing guidance (e.g. no modules installed): show message only, no traceback
+        if err_str and "No modules are installed" in err_str:
+            print(f'\n{e}')
+            exit(1)
         # Catch-all for other exceptions
         import traceback
         print("\nAn unexpected error occurred:")
