@@ -12,9 +12,10 @@ from urllib.parse import urlparse
 from orpheus.core import *
 from orpheus.music_downloader import beauty_format_seconds
 try:
-    from modules.spotify.spotify_api import SpotifyAuthError, SpotifyRateLimitDetectedError
+    from modules.spotify.spotify_api import SpotifyAuthError, SpotifyConfigError, SpotifyRateLimitDetectedError
 except ModuleNotFoundError:
     SpotifyAuthError = None  # type: ignore
+    SpotifyConfigError = None  # type: ignore
     SpotifyRateLimitDetectedError = None  # type: ignore
 
 def setup_ffmpeg_path():
@@ -295,8 +296,10 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print('\n\t^C pressed - abort')
         exit()
-    # Specific handling for SpotifyAuthError, only if it was successfully imported
     except Exception as e:
+        if SpotifyConfigError is not None and isinstance(e, SpotifyConfigError):
+            print(f'\n{e}')
+            exit(1)
         if SpotifyAuthError is not None and isinstance(e, SpotifyAuthError):
             print(f'\nSpotify Authentication Error: {e}')
             print('Please try the command again. If the issue persists, you may need to check your Spotify credentials or network connection.')

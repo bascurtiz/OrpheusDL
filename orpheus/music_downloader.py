@@ -30,18 +30,16 @@ from utils.exceptions import *
 
 # --- Modular Spotify Import ---
 try:
-    from modules.spotify.spotify_api import SpotifyRateLimitDetectedError
+    from modules.spotify.spotify_api import SpotifyRateLimitDetectedError, SpotifyConfigError
 except ModuleNotFoundError:
-    # Define a dummy exception if Spotify module isn't found
-    # This allows 'except SpotifyRateLimitDetectedError:' blocks elsewhere
-    # in this file to still compile, though they will never be triggered.
     class SpotifyRateLimitDetectedError(Exception):
+        pass
+    class SpotifyConfigError(Exception):
         pass
 
 # Platform colors from GUI (hex colors converted to closest ANSI equivalents)
 PLATFORM_COLORS = {
     "tidal": "\033[96m",         # Bright cyan (#33ffe7 -> bright cyan)
-    "jiosaavn": "\x1b[96m",      # Cyan (#1eccb0 -> cyan) 
     "apple music": "\033[91m",   # Bright red (#FA586A -> bright red)
     "beatport": "\033[92m",      # Bright green (#00ff89 -> bright green)
     "beatsource": "\033[94m",    # Bright blue (#16a8f4 -> bright blue)
@@ -1346,6 +1344,8 @@ class Downloader:
                 # This branch may need refinement if other services show different signature needs.
                 artist_info: ArtistInfo = self.service.get_artist_info(artist_id, **prepared_kwargs)
         except Exception as e:
+            if isinstance(e, SpotifyConfigError):
+                raise
             self.print(f"Failed to retrieve artist info for ID {artist_id}: {e}", drop_level=1)
             symbols = self._get_status_symbols()
             self.print(f"=== {symbols['error']} Artist failed ===", drop_level=1)
@@ -1964,6 +1964,8 @@ class Downloader:
                     
             except Exception as e:
                 last_exception = e
+                if isinstance(e, SpotifyConfigError):
+                    raise
                 if isinstance(e, SpotifyRateLimitDetectedError):
                     self.print(f'Could not get track info for {track_id}: {e}')
                     symbols = self._get_status_symbols()
