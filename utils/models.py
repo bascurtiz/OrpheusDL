@@ -102,8 +102,8 @@ codec_data = {
     CodecEnum.HEAAC:  CodecData(pretty_name='HE-AAC',           container=ContainerEnum.m4a,  lossless=False, spatial=False, proprietary=True),
     CodecEnum.MHA1:   CodecData(pretty_name='MPEG-H 3D Audio',  container=ContainerEnum.m4a,  lossless=False, spatial=True,  proprietary=True),
     CodecEnum.MHM1:   CodecData(pretty_name='MPEG-H 3D Audio',  container=ContainerEnum.mp4,  lossless=False, spatial=True,  proprietary=True),
-    CodecEnum.EAC3:   CodecData(pretty_name='Dolby Digital+',   container=ContainerEnum.eac3, lossless=False, spatial=True,  proprietary=True),
-    CodecEnum.AC4:    CodecData(pretty_name='Dolby AC-4 IMS',   container=ContainerEnum.ac4,  lossless=False, spatial=True,  proprietary=True),
+    CodecEnum.EAC3:   CodecData(pretty_name='E-AC-3 JOC',       container=ContainerEnum.m4a,  lossless=False, spatial=True,  proprietary=True),
+    CodecEnum.AC4:    CodecData(pretty_name='AC-4 IMS',         container=ContainerEnum.m4a,  lossless=False, spatial=True,  proprietary=True),
     CodecEnum.AC3:    CodecData(pretty_name='Dolby Digital',    container=ContainerEnum.ac3,  lossless=False, spatial=False, proprietary=True), # AC3 is technically not spatial
     CodecEnum.NONE:   CodecData(pretty_name='Error',            container=ContainerEnum.m4a,  lossless=False, spatial=False, proprietary=False)
 }  # Note: spatial has priority over proprietary when deciding if a codec is enabled

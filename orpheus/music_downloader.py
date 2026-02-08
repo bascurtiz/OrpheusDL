@@ -970,8 +970,8 @@ class Downloader:
 
         return album_path
 
-    def _create_track_location(self, album_location: str, track_info: TrackInfo) -> str:
-        """Create the full file path for a track"""
+    def _create_track_location(self, album_location: str, track_info: TrackInfo, override_codec=None) -> str:
+        """Create the full file path for a track. Use override_codec (e.g. from download_info.different_codec) for the file extension when the downloaded file is in a different container."""
         # Clean up track tags and add special formats
         track_tags = {k: sanitise_name(v) for k, v in asdict(track_info).items()}
         track_tags['explicit'] = ' [E]' if track_info.explicit else ''
@@ -1024,7 +1024,8 @@ class Downloader:
         # Format the filename
         track_filename = format_string.format(**track_tags)
         
-        # Add file extension based on codec
+        # Add file extension based on codec (or override when e.g. Tidal remuxes Atmos to M4A)
+        # AC4/EAC3 (Dolby Atmos): use .m4a so output is always M4A (MPEG-4 audio) per Tidal convention
         codec_extensions = {
             CodecEnum.FLAC: '.flac',
             CodecEnum.MP3: '.mp3',
@@ -1034,11 +1035,12 @@ class Downloader:
             CodecEnum.VORBIS: '.ogg',
             CodecEnum.WAV: '.wav',
             CodecEnum.AIFF: '.aiff',
-            CodecEnum.AC4: '.ac4',
+            CodecEnum.AC4: '.m4a',
             CodecEnum.AC3: '.ac3',
-            CodecEnum.EAC3: '.eac3'
+            CodecEnum.EAC3: '.m4a'
         }
-        extension = codec_extensions.get(track_info.codec, '.flac')  # Default to .flac
+        codec_for_ext = override_codec if override_codec is not None else track_info.codec
+        extension = codec_extensions.get(codec_for_ext, '.flac')  # Default to .flac
         track_filename += extension
         
         # Combine with album location
@@ -1798,9 +1800,11 @@ class Downloader:
         if album_location == '' and await loop.run_in_executor(None, os.path.isfile, track_id):
             return "ALREADY_EXISTS"
             
-        # Create track location
-        track_location = self._create_track_location(album_location, track_info)
-        
+        # Create track location (use different_codec if module converted e.g. Tidal Atmos -> FLAC)
+        track_location = self._create_track_location(
+            album_location, track_info,
+            override_codec=getattr(download_info, 'different_codec', None)
+        )
         # Check if file already exists - use thread pool for file checks
         if await loop.run_in_executor(None, os.path.isfile, track_location):
             return "ALREADY_EXISTS"
@@ -2386,7 +2390,18 @@ class Downloader:
             if details_indent_adjustment != 0:
                 self.set_indent_number(indent_level)
             return return_with_blank_line(None)
-        
+
+        # Use actual container when module converts (e.g. Tidal Atmos AC4 -> FLAC)
+        if getattr(download_info, 'different_codec', None):
+            track_location = self._create_track_location(album_location, track_info, override_codec=download_info.different_codec)
+            if os.path.exists(track_location):
+                d_print(f'Track file already exists')
+                if details_indent_adjustment != 0:
+                    self.set_indent_number(indent_level)
+                symbols = self._get_status_symbols()
+                d_print(f'=== {symbols["skip"]} Track skipped ===', drop_level=header_drop_level)
+                return return_with_blank_line("SKIPPED")
+
         d_print('Downloading audio...')
         try:
             final_location = download_file(
