@@ -104,6 +104,11 @@ def simplify_error_message(error_str: str) -> str:
             # Check if it's likely an FFmpeg/processing issue (avoid 'expected' - it catches TypeError from missing binaries)
             if any(keyword in error_lower for keyword in ['ffmpeg', 'remux', 'processing', 'legacy remux']):
                 return "Apple Music streaming error (FFmpeg required for processing)"
+            # Surface the actual error for generic failures (format: "... - {actual_error}")
+            if " - " in error_str:
+                actual = error_str.split(" - ", 1)[-1].strip()
+                if actual and len(actual) < 120:
+                    return f"Apple Music download error: {actual}"
             return "Apple Music download error"
         elif any(keyword in error_lower for keyword in ['ffmpeg', 'remux', 'processing', 'legacy remux']):
             return "Apple Music streaming error (FFmpeg required for processing)"
