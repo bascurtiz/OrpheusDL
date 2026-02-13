@@ -362,6 +362,12 @@ class Orpheus:
                 {j:new_module_sessions[i]['custom_data'][j] for j in self.module_settings[i].global_storage_variables \
                     if 'custom_data' in new_module_sessions[i] and j in new_module_sessions[i]['custom_data']}
 
+            # Migration/Fix for list-based sessions (legacy or corrupted)
+            if isinstance(new_module_sessions[i]['sessions'], list):
+                 first_session = new_module_sessions[i]['sessions'][0] if new_module_sessions[i]['sessions'] else {}
+                 new_module_sessions[i]['sessions'] = {'default': first_session}
+                 new_module_sessions[i]['selected'] = 'default'
+
             for current_session in new_module_sessions[i]['sessions'].values():
                 # For simple login type only, as it does not apply to advanced login
                 if self.module_settings[i].login_behaviour is ManualEnum.orpheus and not advanced_login_mode:

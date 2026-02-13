@@ -288,7 +288,11 @@ def silentremove(filename):
             raise
 
 def read_temporary_setting(settings_location, module, root_setting=None, setting=None, global_mode=False):
-    temporary_settings = pickle.load(open(settings_location, 'rb'))
+    try:
+        temporary_settings = pickle.load(open(settings_location, 'rb'))
+    except (FileNotFoundError, EOFError):
+        temporary_settings = {'modules': {}}
+
     module_settings = temporary_settings['modules'][module] if module in temporary_settings['modules'] else None
     
     if module_settings:
@@ -305,29 +309,56 @@ def read_temporary_setting(settings_location, module, root_setting=None, setting
         else:
             return session[root_setting] if root_setting in session else None
     elif root_setting and not session:
-        raise Exception('Module does not use temporary settings') 
+        return None  # Return None instead of raising Exception to support cleared sessions
     else:
         return session
 
 def set_temporary_setting(settings_location, module, root_setting, setting=None, value=None, global_mode=False):
-    temporary_settings = pickle.load(open(settings_location, 'rb'))
-    module_settings = temporary_settings['modules'][module] if module in temporary_settings['modules'] else None
+    try:
+        temporary_settings = pickle.load(open(settings_location, 'rb'))
+    except (FileNotFoundError, EOFError):
+        temporary_settings = {'modules': {}}
+
+    if module not in temporary_settings['modules']:
+        # Initialize default structure if missing
+        temporary_settings['modules'][module] = {'sessions': {'default': {'clear_session': False, 'hashes': {}, 'custom_data': {}}}, 'selected': 'default'}
+
+    module_settings = temporary_settings['modules'][module]
 
     if module_settings:
         if global_mode:
             session = module_settings
         else:
+            if 'sessions' not in module_settings or not module_settings['sessions']:
+                module_settings['sessions'] = {'default': {'clear_session': False, 'hashes': {}, 'custom_data': {}}}
+                module_settings['selected'] = 'default'
             session = module_settings['sessions'][module_settings['selected']]
     else:
         session = None
 
     if not session:
-        raise Exception('Module does not use temporary settings')
+        # Should be unreachable with above init, but safety fallback
+        temporary_settings['modules'][module] = {'sessions': {'default': {'clear_session': False, 'hashes': {}, 'custom_data': {}}}, 'selected': 'default'}
+        session = temporary_settings['modules'][module]['sessions']['default']
+
     if setting:
+        if root_setting not in session:
+            session[root_setting] = {}
         session[root_setting][setting] = value
     else:
         session[root_setting] = value
     pickle.dump(temporary_settings, open(settings_location, 'wb'))
+
+def remove_module_from_storage(settings_location, module):
+    """Removes a module's entire entry from storage."""
+    try:
+        temporary_settings = pickle.load(open(settings_location, 'rb'))
+    except (FileNotFoundError, EOFError):
+        return
+
+    if 'modules' in temporary_settings and module in temporary_settings['modules']:
+        del temporary_settings['modules'][module]
+        pickle.dump(temporary_settings, open(settings_location, 'wb'))
 
 create_temp_filename = lambda : f'temp/{os.urandom(16).hex()}'
 
