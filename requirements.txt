@@ -21,3 +21,5 @@ zeroconf>=0.146.4
 CTkToolTip
 customtkinter
 packaging
+httpx
+async_lru
