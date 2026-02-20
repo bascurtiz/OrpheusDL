@@ -90,8 +90,10 @@ def main():
     parser.add_argument('-o', '--output', help='Select a download output path. Default is the provided download path in config/settings.py')
     parser.add_argument('-lr', '--lyrics', default='default', help='Set module to get lyrics from')
     parser.add_argument('-cv', '--covers', default='default', help='Override module to get covers from')
-    parser.add_argument('-cr', '--credits', default='default', help='Override module to get credits from')
+    parser.add_argument('-cr', '--credits', default='default', help='Override module to get covers from')
     parser.add_argument('-sd', '--separatedownload', default='default', help='Select a different module that will download the playlist instead of the main module. Only for playlists.')
+    parser.add_argument('-sc', '--song-codec', help='Select song codec for Apple Music (e.g. atmos, alac, aac-legacy)')
+    parser.add_argument('-uw', '--use-wrapper', action='store_true', help='Use wrapper for downloading (Apple Music)')
     parser.add_argument('arguments', nargs='*', help=help_)
     args = parser.parse_args()
 
@@ -203,8 +205,13 @@ def main():
                         selection = int(selection_input)-1
                         if selection < 0 or selection >= len(items): raise Exception('Invalid selection')
                         print()
-                    selected_item: SearchResult = items[selection]
-                    media_to_download = {modulename: [MediaIdentification(media_type=query_type, media_id=selected_item.result_id, extra_kwargs=selected_item.extra_kwargs or {})]}
+                    selected_item = items[selection]
+                    extra_kwargs = selected_item.extra_kwargs or {}
+                    if modulename == 'applemusic':
+                        if args.song_codec: extra_kwargs['song_codec'] = args.song_codec
+                        if args.use_wrapper: extra_kwargs['use_wrapper'] = args.use_wrapper
+                    
+                    media_to_download = {modulename: [MediaIdentification(media_type=query_type, media_id=selected_item.result_id, extra_kwargs=extra_kwargs)]}
                 elif modulename == 'multi':
                     return  # TODO
                 else:
@@ -221,7 +228,12 @@ def main():
                         media_type = DownloadTypeEnum[args.arguments[2].lower()]
                     except KeyError:
                         raise Exception(f'{args.arguments[2].lower()} is not a valid download type! Choose {media_types}')
-                    media_to_download = {modulename: [MediaIdentification(media_type=media_type, media_id=i) for i in args.arguments[3:]]}
+                    extra_kwargs = {}
+                    if modulename == 'applemusic':
+                        if args.song_codec: extra_kwargs['song_codec'] = args.song_codec
+                        if args.use_wrapper: extra_kwargs['use_wrapper'] = args.use_wrapper
+                    
+                    media_to_download = {modulename: [MediaIdentification(media_type=media_type, media_id=i, extra_kwargs=extra_kwargs) for i in args.arguments[3:]]}
                 else:
                     modules = [i for i in orpheus.module_list if ModuleFlags.hidden not in orpheus.module_settings[i].flags]
                     raise Exception(f'Unknown module name "{modulename}". Must select from: {", ".join(modules)}') # TODO: replace with InvalidModuleError
@@ -253,7 +265,11 @@ def main():
 
                     if orpheus.module_settings[service_name].url_decoding is ManualEnum.manual:
                         module = orpheus.load_module(service_name)
-                        media_to_download[service_name].append(module.custom_url_parse(link))
+                        mediamatch = module.custom_url_parse(link)
+                        if service_name == 'applemusic':
+                            if args.song_codec: mediamatch.extra_kwargs['song_codec'] = args.song_codec
+                            if args.use_wrapper: mediamatch.extra_kwargs['use_wrapper'] = args.use_wrapper
+                        media_to_download[service_name].append(mediamatch)
                     else:
                         if not components or len(components) <= 2:
                             print(f'\tInvalid URL: "{link}"')
@@ -274,7 +290,13 @@ def main():
                             print(f'Invalid URL: "{link}"')
                             exit()
 
-                        media_to_download[service_name].append(MediaIdentification(media_type=type_matches[-1], media_id=components[-1]))
+
+                        extra_kwargs = {}
+                        if service_name == 'applemusic':
+                            if args.song_codec: extra_kwargs['song_codec'] = args.song_codec
+                            if args.use_wrapper: extra_kwargs['use_wrapper'] = args.use_wrapper
+
+                        media_to_download[service_name].append(MediaIdentification(media_type=type_matches[-1], media_id=components[-1], extra_kwargs=extra_kwargs))
                 else:
                     raise Exception(f'Invalid argument: "{link}"')
 

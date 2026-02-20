@@ -90,6 +90,30 @@ def simplify_error_message(error_str: str) -> str:
     if any(phrase in error_lower for phrase in ['track is unavailable', 'track unavailable', 'unavailable']):
         return "This song is unavailable."
     
+    # JSON API error responses (e.g., Apple Music, Qobuz)
+    try:
+        if ('{' in error_str and '}' in error_str) or ('[' in error_str and ']' in error_str):
+            import json
+            import re
+            
+            # Find the JSON part
+            json_match = re.search(r'(\{.*\}|\[.*\])', error_str, re.DOTALL)
+            if json_match:
+                data = json.loads(json_match.group(1))
+                # Apple Music standard error format
+                if isinstance(data, dict) and 'errors' in data and isinstance(data['errors'], list):
+                    err = data['errors'][0]
+                    title = err.get('title')
+                    detail = err.get('detail')
+                    if title and detail:
+                        return f"{title}: {detail}"
+                    return title or detail or "Apple Music API error"
+                # Generic JSON error message
+                if isinstance(data, dict):
+                    return data.get('message') or data.get('error') or data.get('description') or error_str
+    except:
+        pass
+
     # JSON API error responses with 404 code (e.g., Qobuz)
     if '"code":404' in error_str or '"code": 404' in error_str:
         return "This song is unavailable."
@@ -100,21 +124,34 @@ def simplify_error_message(error_str: str) -> str:
     
     # Apple Music errors
     if 'apple music' in error_lower:
-        if 'unexpected error during download' in error_lower:
-            # Check if it's likely an FFmpeg/processing issue (avoid 'expected' - it catches TypeError from missing binaries)
-            if any(keyword in error_lower for keyword in ['ffmpeg', 'remux', 'processing', 'legacy remux']):
-                return "Apple Music streaming error (FFmpeg required for processing)"
-            # Surface the actual error for generic failures (format: "... - {actual_error}")
-            if " - " in error_str:
-                actual = error_str.split(" - ", 1)[-1].strip()
-                if actual and len(actual) < 120:
-                    return f"Apple Music download error: {actual}"
-            return "Apple Music download error"
-        elif any(keyword in error_lower for keyword in ['ffmpeg', 'remux', 'processing', 'legacy remux']):
+        # Preserve specific amdecrypt/decryption agent instructions
+        if 'amdecrypt' in error_lower or 'decryption agent' in error_lower:
+            return error_str
+            
+        if any(keyword in error_lower for keyword in ['ffmpeg', 'remux', 'processing', 'legacy remux']):
             return "Apple Music streaming error (FFmpeg required for processing)"
-        elif 'not authenticated' in error_lower or 'cookies.txt' in error_lower:
+        
+        if 'not authenticated' in error_lower or 'cookies.txt' in error_lower:
             return "Apple Music authentication error (cookies.txt required)"
-        return "Apple Music error"
+
+        # Surface the actual error for generic failures (format: "... - {actual_error}")
+        if " - " in error_str:
+            actual = error_str.split(" - ", 1)[-1].strip()
+            # If it's a StopIteration codec error, prioritize this specific message
+            if 'StopIteration' in actual:
+                return "Apple Music error: Requested quality/codec unavailable"
+            
+            # If the actual part is reasonably short, use it
+            if 5 < len(actual) < 200:
+                return f"Apple Music error: {actual}"
+        
+        # If no specific pattern matched, return the error if it's reasonably sized
+        if len(error_str) < 500:
+            if " - " in error_str and not error_str.split(" - ", 1)[-1].strip():
+                return "Apple Music error: Download failed (unknown cause)"
+            return f"Apple Music error: {error_str}"
+                
+        return "Apple Music error (see logs for details)"
     
     # SoundCloud HLS streaming errors
     if 'soundcloud' in error_lower and ('hls' in error_lower or 'hls_unexpected_error_in_try_block' in error_lower):
@@ -147,12 +184,12 @@ def simplify_error_message(error_str: str) -> str:
         # Take the last part after the final colon, which is usually the most specific error
         parts = error_str.split(':')
         last_part = parts[-1].strip()
-        if len(last_part) > 10 and len(last_part) < 100:  # Reasonable length
+        if 10 < len(last_part) < 100:  # Reasonable length
             return last_part
     
     # If error is too long, truncate it
-    if len(error_str) > 80:
-        return error_str[:77] + "..."
+    if len(error_str) > 120:
+        return error_str[:117] + "..."
     
     return error_str
 
@@ -359,7 +396,39 @@ class Downloader:
             try:
                 # Get track info ONCE and pass it to the download function
                 track_id = args['track_id']
-                track_name = f"Track {track_id}"
+                
+                # Extract display ID for logging to avoid printing full dictionary
+                display_track_id = track_id
+                if isinstance(track_id, dict):
+                    display_track_id = track_id.get('id', 'Unknown')
+                elif hasattr(track_id, 'id'): # Handle object with id attribute
+                     display_track_id = getattr(track_id, 'id', 'Unknown')
+                elif isinstance(track_id, str):
+                    # Handle stringified dictionary
+                    if track_id.strip().startswith('{') or "%7B" in track_id:
+                        import ast
+                        import urllib.parse
+                        try:
+                            clean_id = track_id
+                            if "%7B" in clean_id:
+                                clean_id = urllib.parse.unquote(clean_id)
+                            
+                            if clean_id.strip().startswith('{'):
+                                 try:
+                                     potential_data = ast.literal_eval(clean_id)
+                                     if isinstance(potential_data, dict) and 'id' in potential_data:
+                                         display_track_id = potential_data.get('id')
+                                 except (ValueError, SyntaxError):
+                                     # Fallback: simple string extraction
+                                     if "'id': '" in clean_id:
+                                         start = clean_id.find("'id': '") + 7
+                                         end = clean_id.find("'", start)
+                                         if start > 6 and end > start:
+                                             display_track_id = clean_id[start:end]
+                        except:
+                            pass
+                
+                track_name = f"Track {display_track_id}"
                 
                 # Get track info and download info (API calls) - DO THIS ONCE PER TRACK IN THREAD POOL
                 try:
@@ -403,8 +472,8 @@ class Downloader:
                     
                 except Exception as e:
                     error_msg = str(e)
-                    track_name = track_id
-                    return (index, track_name, f"Could not get track/download info: {error_msg}", None, Exception(f"Could not get track/download info for {track_id}: {error_msg}"), 0, 0)
+                    track_name = f"Track {display_track_id}"
+                    return (index, track_name, f"Could not get track/download info: {error_msg}", None, Exception(f"Could not get track/download info for {display_track_id}: {error_msg}"), 0, 0)
 
                 # Pass both track_info and download_info to avoid double API calls
                 result = await self._download_track_async(
@@ -451,7 +520,13 @@ class Downloader:
 
             except Exception as e:
                 track_duration = time.time() - track_start_time
-                return (index, f"Track {args.get('track_id', 'Unknown')}", e, None, e, 0, track_duration)
+                # Extract display ID again in catch block to be safe
+                safe_display_id = args.get('track_id', 'Unknown')
+                if isinstance(safe_display_id, dict):
+                    safe_display_id = safe_display_id.get('id', 'Unknown')
+                elif hasattr(safe_display_id, 'id'):
+                     safe_display_id = getattr(safe_display_id, 'id', 'Unknown')
+                return (index, f"Track {safe_display_id}", e, None, e, 0, track_duration)
             finally:
                 concurrent_active -= 1
         
@@ -1981,6 +2056,37 @@ class Downloader:
         download_info: TrackDownloadInfo = None
         temp_filename = None
 
+        # Extract display ID for logging to avoid printing full dictionary
+        display_track_id = track_id
+        if isinstance(track_id, dict):
+            display_track_id = track_id.get('id', 'Unknown')
+        elif hasattr(track_id, 'id'): # Handle object with id attribute
+             display_track_id = getattr(track_id, 'id', 'Unknown')
+        elif isinstance(track_id, str):
+            # Handle stringified dictionary
+            if track_id.strip().startswith('{') or "%7B" in track_id:
+                import ast
+                import urllib.parse
+                try:
+                    clean_id = track_id
+                    if "%7B" in clean_id:
+                        clean_id = urllib.parse.unquote(clean_id)
+                    
+                    if clean_id.strip().startswith('{'):
+                         try:
+                             potential_data = ast.literal_eval(clean_id)
+                             if isinstance(potential_data, dict) and 'id' in potential_data:
+                                 display_track_id = potential_data.get('id')
+                         except (ValueError, SyntaxError):
+                             # Fallback: simple string extraction
+                             if "'id': '" in clean_id:
+                                 start = clean_id.find("'id': '") + 7
+                                 end = clean_id.find("'", start)
+                                 if start > 6 and end > start:
+                                     display_track_id = clean_id[start:end]
+                except:
+                    pass
+
         # Removed: blank line before single track downloads - only add blank line after completion
 
         # Use a dummy print function when not verbose
@@ -2059,14 +2165,14 @@ class Downloader:
                 if isinstance(e, SpotifyConfigError):
                     raise
                 if isinstance(e, SpotifyRateLimitDetectedError):
-                    self.print(f'Could not get track info for {track_id}: {e}')
+                    self.print(f'Could not get track info for {display_track_id}: {e}')
                     symbols = self._get_status_symbols()
                     d_print(f'=== {symbols["error"]} Track failed ===', drop_level=header_drop_level)
                     return return_with_blank_line("RATE_LIMITED")
 
                 # Auth/credentials errors: do not retry, show message immediately
                 if self._is_auth_or_credentials_error(e):
-                    self.print(f'Could not get track info for {track_id}: {self._service_key()} --> {e}')
+                    self.print(f'Could not get track info for {display_track_id}: {self._service_key()} --> {e}')
                     symbols = self._get_status_symbols()
                     d_print(f'=== {symbols["error"]} Track failed ===', drop_level=header_drop_level)
                     return return_with_blank_line(None)
@@ -2076,14 +2182,14 @@ class Downloader:
                     self.print(f'Error getting track info, retrying in {retry_delay}s... (attempt {attempt + 1}/{max_retries})')
                     time.sleep(retry_delay)
                 else:
-                    self.print(f'Could not get track info for {track_id}: {self._service_key()} --> {e}')
+                    self.print(f'Could not get track info for {display_track_id}: {self._service_key()} --> {e}')
                     symbols = self._get_status_symbols()
                     d_print(f'=== {symbols["error"]} Track failed ===', drop_level=header_drop_level)
                     return return_with_blank_line(None)
 
         # Check if track_info is still None after all retries
         if track_info is None:
-            self.print(f'Track info is None for {track_id}. Track may be unavailable or not found.')
+            self.print(f'Track info is None for {display_track_id}. Track may be unavailable or not found.')
             symbols = self._get_status_symbols()
             d_print(f'=== {symbols["error"]} Track failed ===', drop_level=header_drop_level)
             return return_with_blank_line(None)
@@ -2098,7 +2204,7 @@ class Downloader:
             )
             service_key = self._service_key()
             if is_credentials_error and service_key != 'service':
-                self.print(f'Could not get track info for {track_id}: {service_key} --> {track_error}')
+                self.print(f'Could not get track info for {display_track_id}: {service_key} --> {track_error}')
             else:
                 self.print(f'Track unavailable: {track_error}')
             symbols = self._get_status_symbols()
@@ -2130,7 +2236,7 @@ class Downloader:
             # This is a multi-track context (album/artist/playlist) - ensure track details have exactly 1 level of indentation
             details_indent_adjustment = 1 - indent_level  # Adjust to get exactly 1 level of indentation
 
-        d_print(f'=== Downloading track {track_info.name} ({track_id}) ===', drop_level=header_drop_level)
+        d_print(f'=== Downloading track {track_info.name} ({display_track_id}) ===', drop_level=header_drop_level)
 
         # Temporarily adjust indent level for track details in single-track albums
         if details_indent_adjustment != 0:
@@ -2236,7 +2342,7 @@ class Downloader:
                 safe_extra_kwargs = extra_kwargs if extra_kwargs is not None else {}
                 download_info: TrackDownloadInfo = self.service.get_track_download(track_id, quality_tier, codec_options, **safe_extra_kwargs)
         except SpotifyRateLimitDetectedError as e:
-            d_print(f'Rate limit detected for {track_id}')
+            d_print(f'Rate limit detected for {display_track_id}')
             symbols = self._get_status_symbols()
             d_print(f'=== {symbols["error"]} Track failed ===', drop_level=header_drop_level)
             # Restore original indent level if it was adjusted
@@ -2268,7 +2374,7 @@ class Downloader:
                     return return_with_blank_line("RATE_LIMITED")  # Reuse the rate limit retry mechanism
             # Check for rate limit in error message as a fallback
             elif "Rate limit suspected" in error_str:
-                d_print(f'Rate limit detected for {track_id} (message-based detection)')
+                d_print(f'Rate limit detected for {display_track_id} (message-based detection)')
                 symbols = self._get_status_symbols()
                 d_print(f'=== {symbols["error"]} Track failed ===', drop_level=header_drop_level)
                 # Restore original indent level if it was adjusted
@@ -2282,7 +2388,7 @@ class Downloader:
                 try:
                     download_info: TrackDownloadInfo = self.service.get_track_download(track_id, quality_tier)
                 except SpotifyRateLimitDetectedError as fallback_e:
-                    d_print(f'Rate limit detected for {track_id}')
+                    d_print(f'Rate limit detected for {display_track_id}')
                     symbols = self._get_status_symbols()
                     d_print(f'=== {symbols["error"]} Track failed ===', drop_level=header_drop_level)
                     # Restore original indent level if it was adjusted
@@ -2292,7 +2398,7 @@ class Downloader:
                 except Exception as fallback_e:
                     # Check if this is a rate limit error even in the fallback
                     if isinstance(fallback_e, SpotifyRateLimitDetectedError):
-                        d_print(f'Rate limit detected for {track_id}')
+                        d_print(f'Rate limit detected for {display_track_id}')
                         symbols = self._get_status_symbols()
                         d_print(f'=== {symbols["error"]} Track failed ===', drop_level=header_drop_level)
                         # Restore original indent level if it was adjusted
@@ -2323,7 +2429,7 @@ class Downloader:
                             return return_with_blank_line("RATE_LIMITED")  # Reuse the rate limit retry mechanism
                     # Also check for rate limit in error message as a fallback
                     elif "Rate limit suspected" in fallback_error_str:
-                        d_print(f'Rate limit detected for {track_id} (message-based detection)')
+                        d_print(f'Rate limit detected for {display_track_id} (message-based detection)')
                         symbols = self._get_status_symbols()
                         d_print(f'=== {symbols["error"]} Track failed ===', drop_level=header_drop_level)
                         # Restore original indent level if it was adjusted
@@ -2351,6 +2457,8 @@ class Downloader:
                             d_print(f'Request failed')
                     else:
                         simplified_error = simplify_error_message(error_msg)
+                        if getattr(self, 'full_settings', {}).get('global', {}).get('advanced', {}).get('debug_mode'):
+                            d_print(f'Original error: {error_msg}')
                         d_print(f'Download failed: {simplified_error}')
                     symbols = self._get_status_symbols()
                     d_print(f'=== {symbols["error"]} Track failed ===', drop_level=header_drop_level)
@@ -2380,6 +2488,8 @@ class Downloader:
                         d_print(f'Request failed')
                 else:
                     simplified_error = simplify_error_message(error_msg)
+                    if getattr(self, 'full_settings', {}).get('global', {}).get('advanced', {}).get('debug_mode'):
+                        d_print(f'Original error: {error_msg}')
                     d_print(f'Download failed: {simplified_error}')
                 symbols = self._get_status_symbols()
                 d_print(f'=== {symbols["error"]} Track failed ===', drop_level=header_drop_level)
