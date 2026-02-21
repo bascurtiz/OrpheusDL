@@ -380,29 +380,33 @@ async def download_to_temp_async(session, url, headers={}, extension='', enable_
 
 def find_system_ffmpeg():
     """
-    Find FFmpeg on macOS or Linux. Returns (found: bool, path: str).
+    Find FFmpeg on macOS, Linux, or Windows. Returns (found: bool, path: str).
     Checks common locations first, then system PATH.
     """
     import subprocess
     import platform
     
+    system = platform.system()
     # Common FFmpeg locations by platform
-    if platform.system() == 'Darwin':
+    if system == 'Darwin':
         # macOS - Homebrew locations
         common_paths = [
             '/opt/homebrew/bin/ffmpeg',   # Apple Silicon
             '/usr/local/bin/ffmpeg',      # Intel
         ]
-        
-        # Add local app directories for manual installation (fallback)
-        # Note: get_data_directory/get_script_directory are not available here easily without circular imports
-        # so we rely on system paths or PATH for now in this utility
-    elif platform.system() == 'Linux':
+    elif system == 'Linux':
         # Linux - common package manager locations
         common_paths = [
             '/usr/bin/ffmpeg',            # apt, dnf, pacman
             '/usr/local/bin/ffmpeg',      # manual install
             '/snap/bin/ffmpeg',           # snap
+        ]
+    elif system == 'Windows':
+        # Windows - common chocolatey/scoop/manual locations
+        common_paths = [
+            'C:/ProgramData/chocolatey/bin/ffmpeg.exe',
+            os.path.expandvars('%USERPROFILE%/scoop/shims/ffmpeg.exe'),
+            'C:/ffmpeg/bin/ffmpeg.exe',
         ]
     else:
         common_paths = []
@@ -416,12 +420,13 @@ def find_system_ffmpeg():
             except:
                 pass
     
-    # Try system PATH using 'which' (works on both macOS and Linux)
+    # Try system PATH using 'which' (macOS/Linux) or 'where' (Windows)
     try:
-        result = subprocess.run(['which', 'ffmpeg'], capture_output=True, timeout=3)
+        cmd = 'where' if system == 'Windows' else 'which'
+        result = subprocess.run([cmd, 'ffmpeg' if system != 'Windows' else 'ffmpeg.exe'], capture_output=True, timeout=3)
         if result.returncode == 0:
-            ffmpeg_path = result.stdout.decode().strip()
-            if ffmpeg_path:
+            ffmpeg_path = result.stdout.decode().strip().split('\n')[0].strip()
+            if ffmpeg_path and os.path.isfile(ffmpeg_path):
                 return True, ffmpeg_path
     except:
         pass
