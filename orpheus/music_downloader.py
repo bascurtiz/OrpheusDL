@@ -2289,15 +2289,22 @@ class Downloader:
                 codec_info.append('bit depth: 16bit')
                 codec_info.append('sample rate: 44100kHz')
             else:
-                # For other services, use actual track info
-                codec_info.append(f'Codec: {codec_name}')
+                # For Atmos, show uniform information as requested
+                if codec_name == 'EAC3':
+                    codec_info.append('Codec: Dolby Atmos (EAC3 JOC)')
+                    codec_info.append('bitrate: 768kbps')
+                    codec_info.append('channels: 5.1')
+                    codec_info.append('sample rate: 48kHz')
+                else:
+                    # For other services and non-Atmos codecs, use actual track info
+                    codec_info.append(f'Codec: {codec_name}')
 
-                if track_info.bitrate:
-                    codec_info.append(f'bitrate: {track_info.bitrate}kbps')
-                if track_info.bit_depth:
-                    codec_info.append(f'bit depth: {track_info.bit_depth}bit')
-                if track_info.sample_rate:
-                    codec_info.append(f'sample rate: {track_info.sample_rate}kHz')
+                    if track_info.bitrate:
+                        codec_info.append(f'bitrate: {track_info.bitrate}kbps')
+                    if track_info.bit_depth:
+                        codec_info.append(f'bit depth: {track_info.bit_depth}bit')
+                    if track_info.sample_rate:
+                        codec_info.append(f'sample rate: {track_info.sample_rate}kHz')
 
             d_print(', '.join(codec_info))
 

@@ -208,6 +208,7 @@ class QualityEnum(Flag):
     HIGH = auto()
     LOSSLESS = auto()
     HIFI = auto()
+    ATMOS = auto()
 
 
 @dataclass
