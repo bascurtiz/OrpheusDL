@@ -22,4 +22,4 @@ CTkToolTip
 customtkinter
 packaging
 httpx
-async_lru
+async_lru==2.1.0
