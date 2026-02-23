@@ -389,10 +389,11 @@ def find_system_ffmpeg():
     system = platform.system()
     # Common FFmpeg locations by platform
     if system == 'Darwin':
-        # macOS - Homebrew locations
+        # macOS - Homebrew and system locations
         common_paths = [
             '/opt/homebrew/bin/ffmpeg',   # Apple Silicon
             '/usr/local/bin/ffmpeg',      # Intel
+            '/usr/bin/ffmpeg',            # System
         ]
     elif system == 'Linux':
         # Linux - common package manager locations

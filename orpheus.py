@@ -11,6 +11,7 @@ import json
 from urllib.parse import urlparse
 from orpheus.core import *
 from orpheus.music_downloader import beauty_format_seconds
+from utils.utils import find_system_ffmpeg
 try:
     from modules.spotify.spotify_api import SpotifyAuthError, SpotifyConfigError, SpotifyRateLimitDetectedError
 except ModuleNotFoundError:
@@ -20,50 +21,51 @@ except ModuleNotFoundError:
 
 def setup_ffmpeg_path():
     """Setup FFmpeg path from settings.json to match GUI behavior.
-    If no custom path is set, also check project root and script directory for ffmpeg."""
+    Also ensures common system paths (Homebrew, etc.) are checked."""
     try:
         current_path = os.environ.get("PATH", "")
         ffmpeg_dir_added = None
 
-        # Try to load settings.json from config folder
+        # 1. Try to load custom FFmpeg path from settings.json
         settings_path = os.path.join("config", "settings.json")
         if os.path.exists(settings_path):
             with open(settings_path, 'r', encoding='utf-8') as f:
                 settings = json.load(f)
 
-            # Get FFmpeg path setting (GUI uses "global", some code uses "globals")
             ffmpeg_path_setting = (
                 settings.get("global", {}).get("advanced", {}).get("ffmpeg_path")
                 or settings.get("globals", {}).get("advanced", {}).get("ffmpeg_path", "ffmpeg")
             )
-            if ffmpeg_path_setting is None:
-                ffmpeg_path_setting = "ffmpeg"
+            
+            if isinstance(ffmpeg_path_setting, str) and ffmpeg_path_setting.strip() and ffmpeg_path_setting.lower() != "ffmpeg":
+                candidate = ffmpeg_path_setting.strip()
+                if os.path.isfile(candidate):
+                    ffmpeg_dir_added = os.path.dirname(candidate)
+                elif os.path.isdir(candidate):
+                    ffmpeg_dir_added = candidate
 
-            if isinstance(ffmpeg_path_setting, str):
-                ffmpeg_path_setting = ffmpeg_path_setting.strip()
-
-                # If it's a custom path (not just "ffmpeg"), add directory to PATH
-                if ffmpeg_path_setting and ffmpeg_path_setting.lower() != "ffmpeg":
-                    if os.path.isfile(ffmpeg_path_setting):
-                        ffmpeg_dir_added = os.path.dirname(ffmpeg_path_setting)
-
-        # If no custom path was set or file not found, look for ffmpeg in root/script dir
+        # 2. If no custom path set, look for local ffmpeg in project root or script dir
         if ffmpeg_dir_added is None:
             ffmpeg_name = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
             search_dirs = [
-                os.getcwd(),  # project root when running e.g. python3 orpheus.py
-                os.path.dirname(os.path.abspath(__file__)),  # directory containing orpheus.py
+                os.getcwd(),
+                os.path.dirname(os.path.abspath(__file__)),
             ]
             for dir_path in search_dirs:
-                candidate = os.path.join(dir_path, ffmpeg_name)
-                if os.path.isfile(candidate):
+                if os.path.isfile(os.path.join(dir_path, ffmpeg_name)):
                     ffmpeg_dir_added = dir_path
                     break
 
+        # 3. Use the robust system finder from utils (covers Homebrew, etc.)
+        if ffmpeg_dir_added is None:
+            found, system_ffmpeg = find_system_ffmpeg()
+            if found:
+                ffmpeg_dir_added = os.path.dirname(system_ffmpeg)
+
+        # Apply to PATH if a directory was found
         if ffmpeg_dir_added and ffmpeg_dir_added not in current_path.split(os.pathsep):
             os.environ["PATH"] = ffmpeg_dir_added + os.pathsep + current_path
     except Exception as e:
-        # Don't fail if we can't setup FFmpeg path, just continue
         print(f"Warning: Could not setup FFmpeg path: {e}")
 
 def main():
