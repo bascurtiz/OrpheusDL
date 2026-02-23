@@ -377,6 +377,7 @@ class TrackInfo:
     lyrics_extra_kwargs: Optional[dict] = field(default_factory=dict)
     error: Optional[str] = None
     preview_url: Optional[str] = None  # URL to audio preview (e.g. Beatport/Beatsource sample)
+    additional: Optional[str] = None
 
 
 @dataclass
