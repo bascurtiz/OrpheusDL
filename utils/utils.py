@@ -413,18 +413,24 @@ def find_system_ffmpeg():
         common_paths = []
     
     for path in common_paths:
-        if os.path.isfile(path):
             try:
-                result = subprocess.run([path, '-version'], capture_output=True, timeout=3)
+                # Use CREATE_NO_WINDOW on Windows to avoid transient console popup
+                run_kwargs = {'capture_output': True, 'timeout': 3}
+                if platform.system() == 'Windows':
+                    run_kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
+                result = subprocess.run([path, '-version'], **run_kwargs)
                 if result.returncode == 0:
                     return True, path
             except:
                 pass
     
-    # Try system PATH using 'which' (macOS/Linux) or 'where' (Windows)
     try:
         cmd = 'where' if system == 'Windows' else 'which'
-        result = subprocess.run([cmd, 'ffmpeg' if system != 'Windows' else 'ffmpeg.exe'], capture_output=True, timeout=3)
+        # Use CREATE_NO_WINDOW on Windows to avoid transient console popup
+        run_kwargs = {'capture_output': True, 'timeout': 3}
+        if system == 'Windows':
+            run_kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
+        result = subprocess.run([cmd, 'ffmpeg' if system != 'Windows' else 'ffmpeg.exe'], **run_kwargs)
         if result.returncode == 0:
             ffmpeg_path = result.stdout.decode().strip().split('\n')[0].strip()
             if ffmpeg_path and os.path.isfile(ffmpeg_path):
