@@ -378,6 +378,18 @@ async def download_to_temp_async(session, url, headers={}, extension='', enable_
     await download_file_async(session, url, location, headers=headers, enable_progress_bar=enable_progress_bar, indent_level=indent_level)
     return location
 
+def get_clean_env():
+    """Get a clean environment for subprocesses to avoid PyInstaller library conflicts."""
+    import os
+    env = os.environ.copy()
+    env.pop('LD_LIBRARY_PATH', None)
+    env.pop('DYLD_LIBRARY_PATH', None)
+    if 'LD_LIBRARY_PATH_ORIG' in env:
+        env['LD_LIBRARY_PATH'] = env['LD_LIBRARY_PATH_ORIG']
+    if 'DYLD_LIBRARY_PATH_ORIG' in env:
+        env['DYLD_LIBRARY_PATH'] = env['DYLD_LIBRARY_PATH_ORIG']
+    return env
+
 def find_system_ffmpeg():
     """
     Find FFmpeg on macOS, Linux, or Windows. Returns (found: bool, path: str).
@@ -415,7 +427,7 @@ def find_system_ffmpeg():
     for path in common_paths:
             try:
                 # Use CREATE_NO_WINDOW on Windows to avoid transient console popup
-                run_kwargs = {'capture_output': True, 'timeout': 3}
+                run_kwargs = {'capture_output': True, 'timeout': 3, 'env': get_clean_env()}
                 if platform.system() == 'Windows':
                     run_kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
                 result = subprocess.run([path, '-version'], **run_kwargs)
@@ -427,7 +439,7 @@ def find_system_ffmpeg():
     try:
         cmd = 'where' if system == 'Windows' else 'which'
         # Use CREATE_NO_WINDOW on Windows to avoid transient console popup
-        run_kwargs = {'capture_output': True, 'timeout': 3}
+        run_kwargs = {'capture_output': True, 'timeout': 3, 'env': get_clean_env()}
         if system == 'Windows':
             run_kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
         result = subprocess.run([cmd, 'ffmpeg' if system != 'Windows' else 'ffmpeg.exe'], **run_kwargs)
