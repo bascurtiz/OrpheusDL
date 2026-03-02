@@ -1545,15 +1545,15 @@ class Downloader:
             self.print(f'Album {index}/{number_of_albums}')
 
             album_id_to_process = None
-            # Check if album_item is a string (like for Tidal)
-            if isinstance(album_item, str):
-                album_id_to_process = album_item
+            # Check if album_item is a string or integer (like for Tidal, SoundCloud)
+            if isinstance(album_item, (str, int)):
+                album_id_to_process = str(album_item)
             # Check if album_item is a dictionary with an 'id' key (like for Spotify)
-            elif isinstance(album_item, dict) and 'id' in album_item and isinstance(album_item['id'], str):
-                album_id_to_process = album_item['id']
+            elif isinstance(album_item, dict) and 'id' in album_item and isinstance(album_item['id'], (str, int)):
+                album_id_to_process = str(album_item['id'])
             # Check if album_item is an object with an 'id' attribute (more generic)
-            elif hasattr(album_item, 'id') and isinstance(getattr(album_item, 'id', None), str):
-                 album_id_to_process = album_item.id # type: ignore
+            elif hasattr(album_item, 'id') and isinstance(getattr(album_item, 'id', None), (str, int)):
+                 album_id_to_process = str(album_item.id) # type: ignore
             else:
                 self.print(f"Skipping unrecognized album item in artist_info.albums: {album_item}")
                 continue
