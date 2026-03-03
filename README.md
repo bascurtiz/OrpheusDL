@@ -52,13 +52,13 @@ Follow these steps to get a local copy of Orpheus up and running:
    B. `pip install --no-deps --target vendor/librespot git+https://github.com/kokarare1212/librespot-python`<br>
       (use pip3 on macOS)<br>
  
-3. `python orpheus.py settings refresh`<br>
-   (use python3 on macOS)<br>
+3. A. `python orpheus.py settings refresh`<br>
+       (use python3 on macOS)<br>
+   B. Make sure Python certificates are up to date:<br>
+       `pip install --upgrade certifi`<br>
+       (python3 on macOS)<br>
 
-4. Install modules:
-   Make sure Python certificates are up to date:<br>
-   `pip install --upgrade certifi`<br>
-   (python3 on macOS)<br>
+4. Install modules:<br>   
    Apple Music:
    `git clone https://github.com/bascurtiz/orpheusdl-applemusic modules/applemusic`<br>
    Beatport:
@@ -78,7 +78,7 @@ Follow these steps to get a local copy of Orpheus up and running:
    YouTube:
    `git clone https://github.com/bascurtiz/orpheusdl-youtube modules/youtube`<br>
 
-5. Run Orpheus to create settings.json:
+5. Run Orpheus to create settings.json:<br>
    `python orpheus.py`<br>
     (use python3 on macOS)
 
