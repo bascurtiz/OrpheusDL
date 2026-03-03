@@ -5,7 +5,7 @@
 OrpheusDL
 =========
 
-This fork enables downloading from Spotify & Apple Music
+This fork enables downloading from Spotify, Apple Music, Beatsource / interacts with the [GUI](https://github.com/bascurtiz/OrpheusDL-GUI)
 
 [Report Bug](https://github.com/bascurtiz/OrpheusDL/issues)
 ·
@@ -39,30 +39,50 @@ Follow these steps to get a local copy of Orpheus up and running:
 
 ### Prerequisites
 
-* Python 3.7+ (due to the requirement of dataclasses), though Python 3.9 is highly recommended
+* Python 3.11.9 is recommended (but might work fine with older versions)
+
+   a. https://www.python.org/downloads/release/python-3119/
+   b. https://git-scm.com/downloads
 
 ### Installation
 
-[![Watch how to install](https://i.imgur.com/pNqYcYh.png)](https://youtu.be/AGsYTQuO7nk)
+1. Open up cmd/terminal and cd into a place where you want to save Orpheus
+2. a. `git clone https://github.com/bascurtiz/OrpheusDL && cd OrpheusDL && pip install --upgrade --ignore-installed -r requirements.txt`
+      (use pip3 on macOS)
+   b. `pip install --no-deps --target vendor/librespot git+https://github.com/kokarare1212/librespot-python`
+      (use pip3 on macOS)
+ 
+3. `python orpheus.py settings refresh`
+   (use python3 on macOS)
 
-1. Clone the repo
-    ```shell
-    git clone https://github.com/bascurtiz/OrpheusDL && cd OrpheusDL
-    ```
-2. Install all requirements
-   ```shell
-   pip install --upgrade --ignore-installed -r requirements.txt
-   ```
-3. Install vendored librespot (required for Spotify module, avoids protobuf conflicts)
-   ```shell
-   pip install --no-deps --target vendor/librespot git+https://github.com/kokarare1212/librespot-python
-   ```
-   **Note:** This installs librespot into a vendor directory to avoid protobuf version conflicts. The librespot dependencies (websocket-client, pyogg, zeroconf) are already included in step 2 via `requirements.txt`.
-4. Run the program at least once, or use this command to create the settings file
-   ```shell
-   python orpheus.py settings refresh
-   ```
-5. Enter your credentials in `config/settings.json`
+4. Install modules:
+   Make sure Python certificates are up to date:
+   `pip install --upgrade certifi`
+   (python3 on macOS)
+   Apple Music:
+   `git clone https://github.com/bascurtiz/orpheusdl-applemusic modules/applemusic`
+   Beatport:
+   `git clone https://github.com/bascurtiz/orpheusdl-beatport modules/beatport`
+   Beatsource: 
+   `git clone https://github.com/bascurtiz/orpheusdl-beatsource modules/beatsource`
+   Deezer: 
+   `git clone https://github.com/bascurtiz/orpheusdl-deezer modules/deezer`
+   Qobuz:
+   `git clone https://github.com/bascurtiz/orpheusdl-qobuz modules/qobuz`
+   SoundCloud:
+   `git clone https://github.com/bascurtiz/orpheusdl-soundcloud modules/soundcloud`
+   Spotify:
+   `git clone https://github.com/bascurtiz/orpheusdl-spotify modules/spotify`
+   Tidal: 
+   `git clone --recurse-submodules https://github.com/bascurtiz/orpheusdl-tidal modules/tidal`
+   YouTube:
+   `git clone https://github.com/bascurtiz/orpheusdl-youtube modules/youtube`
+
+5. Run Orpheus to create settings.json:
+   `python orpheus.py`
+    (use python3 on macOS)
+
+[![Watch how to install](https://i.imgur.com/pNqYcYh.png)](https://youtu.be/AGsYTQuO7nk)
 
 <!-- USAGE EXAMPLES -->
 ## Usage
@@ -72,14 +92,9 @@ Just call `orpheus.py` with any link you want to archive, for example Qobuz:
 python orpheus.py https://open.qobuz.com/album/c9wsrrjh49ftb
 ```
 
-Alternatively do a search (luckysearch to automatically select the first option):
+Alternatively do a search:
 ```shell
 python orpheus.py search qobuz track darkside alan walker
-```
-
-Or if you have the ID of what you want to download, use:
-```shell
-python orpheus.py download qobuz track 52151405
 ```
 
 <!-- CONFIGURATION -->
@@ -100,10 +115,10 @@ loaded module. You'll find the configuration file here: `config/settings.json`
 `download_path`: Set the absolute or relative output path with `/` as the delimiter
 
 `download_quality`: Choose one of the following settings:
+* "atmos": Dolby Atmos (only applicable to Apple Music & TIDAL)
 * "hifi": FLAC higher than 44.1/16 if available
 * "lossless": FLAC with 44.1/16 if available
 * "high": lossy codecs such as MP3, AAC, ... in a higher bitrate
-* "medium": lossy codecs such as MP3, AAC, ... in a medium bitrate
 * "low": lossy codecs such as MP3, AAC, ... in a lower bitrate
 
 **NOTE: The `download_quality` really depends on the used modules, so check out the modules README.md**
