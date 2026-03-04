@@ -485,7 +485,7 @@ def orpheus_core_download(orpheus_session: Orpheus, media_to_download, third_par
                     # Add rate limiting for individual track downloads (like from urls.txt)
                     # Only pause if track was actually downloaded (not skipped) and not the last track
                     if (mainmodule.lower() == 'spotify' and index < total_items_in_batch and 
-                        download_result is not None and download_result != "RATE_LIMITED"):
+                        download_result is not None and download_result != "RATE_LIMITED" and download_result != "SKIPPED"):
                         pause_seconds = downloader._get_spotify_pause_seconds()
                         # Don't add extra blank line - track completion already handles spacing
                         downloader.print(f'Pausing {pause_seconds} seconds to prevent rate limiting...', drop_level=1)

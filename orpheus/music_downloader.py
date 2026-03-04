@@ -945,12 +945,12 @@ class Downloader:
                     # Add pause between downloads for Spotify/YouTube to prevent rate limiting
                     # Only pause if track was actually downloaded (not skipped) and not the last track
                     if (service_name_lower == 'spotify' and index < number_of_tracks and 
-                        download_result is not None and download_result != "RATE_LIMITED"):
+                        download_result is not None and download_result != "RATE_LIMITED" and download_result != "SKIPPED"):
                         pause_seconds = self._get_spotify_pause_seconds()
                         self.print(f'Pausing {pause_seconds} seconds to prevent rate limiting...', drop_level=1)
                         time.sleep(pause_seconds)
                     elif (service_name_lower == 'youtube' and index < number_of_tracks and 
-                        download_result is not None and download_result != "RATE_LIMITED"):
+                        download_result is not None and download_result != "RATE_LIMITED" and download_result != "SKIPPED"):
                         pause_seconds = self._get_youtube_pause_seconds()
                         self.print(f'Pausing {pause_seconds} seconds to prevent rate limiting...', drop_level=1)
                         time.sleep(pause_seconds)
@@ -1363,13 +1363,13 @@ class Downloader:
                     # Add pause between downloads for Spotify/YouTube to prevent rate limiting
                     # Only pause if track was actually downloaded (not skipped) and not the last track
                     if (service_name_lower == 'spotify' and index < number_of_tracks and 
-                        download_result is not None and download_result != "RATE_LIMITED"):
+                        download_result is not None and download_result != "RATE_LIMITED" and download_result != "SKIPPED"):
                         pause_seconds = self._get_spotify_pause_seconds()
                         self.print(f'Pausing {pause_seconds} seconds to prevent rate limiting...', drop_level=1)
                         time.sleep(pause_seconds)
                         print()  # Add blank line after pause message for consistent spacing with playlists
                     elif (service_name_lower == 'youtube' and index < number_of_tracks and 
-                        download_result is not None and download_result != "RATE_LIMITED"):
+                        download_result is not None and download_result != "RATE_LIMITED" and download_result != "SKIPPED"):
                         pause_seconds = self._get_youtube_pause_seconds()
                         self.print(f'Pausing {pause_seconds} seconds to prevent rate limiting...', drop_level=1)
                         time.sleep(pause_seconds)
@@ -1671,13 +1671,13 @@ class Downloader:
                     # Add pause between downloads for Spotify/YouTube to prevent rate limiting
                     # Only pause if track was actually downloaded (not skipped) and not the last track
                     if (service_name_lower == 'spotify' and index < number_of_tracks_new and 
-                        download_result is not None and download_result != "RATE_LIMITED"):
+                        download_result is not None and download_result != "RATE_LIMITED" and download_result != "SKIPPED"):
                         pause_seconds = self._get_spotify_pause_seconds()
                         self.print(f'Pausing {pause_seconds} seconds to prevent rate limiting...', drop_level=1)
                         time.sleep(pause_seconds)
                         print()  # Add blank line after pause message for consistent spacing
                     elif (service_name_lower == 'youtube' and index < number_of_tracks_new and 
-                        download_result is not None and download_result != "RATE_LIMITED"):
+                        download_result is not None and download_result != "RATE_LIMITED" and download_result != "SKIPPED"):
                         pause_seconds = self._get_youtube_pause_seconds()
                         self.print(f'Pausing {pause_seconds} seconds to prevent rate limiting...', drop_level=1)
                         time.sleep(pause_seconds)
