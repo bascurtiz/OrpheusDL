@@ -3051,7 +3051,7 @@ class Downloader:
         if not module_name:
             module_name = self.service_name
         return {
-            'should_resize': ModuleFlags.needs_cover_resize in self.module_settings[module_name].flags,
+            'should_resize': True, # Always attempt resizing to respect the user's resolution setting
             'resolution': self.global_settings['covers']['external_resolution'] if is_external else self.global_settings['covers']['main_resolution'],
             'compression': self.global_settings['covers']['external_compression'] if is_external else self.global_settings['covers']['main_compression'],
             'format': self.global_settings['covers']['external_format'] if is_external else 'jpg'
