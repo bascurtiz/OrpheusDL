@@ -281,6 +281,7 @@ class Tags:
     comment: Optional[str] = None
     label: Optional[str] = None
     catalog_number: Optional[str] = None
+    track_url: Optional[str] = None
     extra_tags: Optional[dict] = field(default_factory=dict)
 
 

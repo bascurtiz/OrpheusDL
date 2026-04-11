@@ -247,31 +247,63 @@ class Downloader:
         """Fetches lyrics and credits using either the main service or third-party modules."""
         # 1. Fetch Lyrics
         if self.global_settings.get('lyrics', {}).get('embed_lyrics', True) or self.global_settings.get('lyrics', {}).get('save_synced_lyrics', True):
-            lyrics_module = self.third_party_modules.get('lyrics', 'default') if self.third_party_modules else 'default'
-            lyrics_service = self.service if lyrics_module == 'default' else self.loaded_modules.get(lyrics_module)
+            lyrics_module = self.third_party_modules.get(ModuleModes.lyrics) or self.third_party_modules.get('lyrics', 'default') if self.third_party_modules else 'default'
+            lyrics_service = self.service if lyrics_module == 'default' else self.loaded_modules.get(str(lyrics_module).lower())
             
             if lyrics_service and hasattr(lyrics_service, 'get_track_lyrics'):
                 try:
-                    lyrics_info = lyrics_service.get_track_lyrics(track_info.id, **track_info.lyrics_extra_kwargs)
-                    if lyrics_info:
-                        track_info.lyrics = lyrics_info.embedded
-                        # Pass synced lyrics to the caller via an attribute for saving
-                        track_info.synced_lyrics = lyrics_info.synced
-                    else:
-                        self.print('No lyrics available for this track', drop_level=1)
+                    # Bridge ID if using a third-party module
+                    fetch_id = track_info.id
+                    fetch_extra_kwargs = track_info.lyrics_extra_kwargs
+                    
+                    if lyrics_module != 'default' and lyrics_module != self.service_name:
+                        self.print(f'Searching for lyrics on {lyrics_module}...')
+                        search_results = self.search_by_tags(str(lyrics_module).lower(), track_info)
+                        if search_results:
+                            fetch_id = search_results[0].result_id
+                            fetch_extra_kwargs = search_results[0].extra_kwargs
+                        else:
+                            self.print(f'Lyrics match not found on {lyrics_module}')
+                            fetch_id = None
+
+                    if fetch_id:
+                        lyrics_info = lyrics_service.get_track_lyrics(fetch_id, **fetch_extra_kwargs)
+                        if lyrics_info:
+                            track_info.lyrics = lyrics_info.embedded
+                            # Pass synced lyrics to the caller via an attribute for saving
+                            track_info.synced_lyrics = lyrics_info.synced
+                        else:
+                            self.print('No lyrics available for this track')
                 except Exception as e:
-                    self.print(f'Could not fetch lyrics: {e}', drop_level=1)
+                    self.print(f'Could not fetch lyrics: {e}')
 
         # 2. Fetch Credits
-        credits_module = self.third_party_modules.get('credits', 'default') if self.third_party_modules else 'default'
-        credits_service = self.service if credits_module == 'default' else self.loaded_modules.get(credits_module)
+        credits_module = self.third_party_modules.get(ModuleModes.credits) or self.third_party_modules.get('credits', 'default') if self.third_party_modules else 'default'
+        credits_service = self.service if credits_module == 'default' else self.loaded_modules.get(str(credits_module).lower())
         
         if credits_service and hasattr(credits_service, 'get_track_credits'):
             try:
-                # Store credits_list directly on track_info for tagging
-                track_info.credits_list = credits_service.get_track_credits(track_info.id, **track_info.credits_extra_kwargs)
+                # Bridge ID if using a third-party module
+                fetch_id = track_info.id
+                fetch_extra_kwargs = track_info.credits_extra_kwargs
+                
+                if credits_module != 'default' and credits_module != self.service_name:
+                    self.print(f'Searching for credits on {credits_module}...')
+                    search_results = self.search_by_tags(str(credits_module).lower(), track_info)
+                    if search_results:
+                        fetch_id = search_results[0].result_id
+                        fetch_extra_kwargs = search_results[0].extra_kwargs
+                    else:
+                        self.print(f'Credits match not found on {credits_module}')
+                        fetch_id = None
+                
+                if fetch_id:
+                    # Store credits_list directly on track_info for tagging
+                    track_info.credits_list = credits_service.get_track_credits(fetch_id, **fetch_extra_kwargs)
+                else:
+                    track_info.credits_list = []
             except Exception as e:
-                self.print(f'Could not fetch credits: {e}', drop_level=1)
+                self.print(f'Could not fetch credits: {e}')
                 track_info.credits_list = []
         else:
             track_info.credits_list = []
@@ -414,7 +446,7 @@ class Downloader:
         return os.path.join(self.temp_dir, str(uuid.uuid4()))
 
     def search_by_tags(self, module_name, track_info: TrackInfo):
-        return self.loaded_modules[module_name].search(DownloadTypeEnum.track, f'{track_info.name} {" ".join(track_info.artists)}', track_info=track_info)
+        return self.loaded_modules[str(module_name).lower()].search(DownloadTypeEnum.track, f'{track_info.name} {" ".join(track_info.artists)}', track_info=track_info)
 
     def _concurrent_download_tracks(self, track_list, download_args_list, concurrent_downloads, performance_summary_indent=0):
         """Helper method to download tracks concurrently using asyncio + aiohttp"""
@@ -831,7 +863,7 @@ class Downloader:
             return []
 
         self.print(f'=== Downloading playlist {playlist_info.name} ({playlist_id}) ===', drop_level=1)
-        self.print(f'Playlist creator: {playlist_info.creator}' + (f' ({playlist_info.creator_id})' if playlist_info.creator_id else ''))
+        self.print(f'Playlist creator: {playlist_info.creator}')
         if playlist_info.release_year: self.print(f'Playlist creation year: {playlist_info.release_year}')
         if playlist_info.duration: self.print(f'Duration: {beauty_format_seconds(playlist_info.duration)}')
         number_of_tracks = len(playlist_info.tracks)
@@ -1141,11 +1173,7 @@ class Downloader:
         # Use meta_sep for consistent artist joining in filenames
         track_tags['artist'] = meta_sep.join([sanitise_name(artist) for artist in track_info.artists]) if track_info.artists else ''
         # Ensure album_artist is a string and falls back to joined track artist if missing
-        album_artist_val = track_info.tags.album_artist
-        if isinstance(album_artist_val, list):
-             album_artist_val = album_artist_val[0] if album_artist_val else ""
-             
-        track_tags['album_artist'] = sanitise_name(album_artist_val) if album_artist_val else track_tags['artist']
+        track_tags['album_artist'] = sanitise_name(get_primary_artist(track_info.tags.album_artist)) if track_info.tags.album_artist else track_tags['artist']
         
         # Add commonly used tag fields from track_info.tags
         track_tags['isrc'] = sanitise_name(track_info.tags.isrc) if track_info.tags.isrc else ''
@@ -1273,7 +1301,7 @@ class Downloader:
             elif self.download_mode is DownloadTypeEnum.artist:
                 self.set_indent_number(1)
                 self.print(f'=== Downloading album {album_info.name} ({album_id}) ===', drop_level=1)
-            self.print(f'Artist: {album_info.artist} ({album_info.artist_id})')
+            self.print(f'Artist: {album_info.artist}')
             if album_info.release_year: self.print(f'Year: {album_info.release_year}')
             if album_info.duration: self.print(f'Duration: {beauty_format_seconds(album_info.duration)}')
             self.print(f'Number of tracks: {number_of_tracks!s}')
@@ -1623,7 +1651,7 @@ class Downloader:
         number_of_albums = len(artist_info.albums)
         number_of_tracks = len(artist_info.tracks)
 
-        self.print(f'=== Downloading artist {artist_name} ({artist_id}) ===', drop_level=1)
+        self.print(f'=== Downloading artist {artist_name} ===', drop_level=1)
         if number_of_albums: self.print(f'Number of albums: {number_of_albums!s}')
         if number_of_tracks: self.print(f'Number of tracks: {number_of_tracks!s}')
         colored_platform = get_colored_platform_name(self.module_settings[self.service_name].service_name)
@@ -2124,17 +2152,20 @@ class Downloader:
             else:
                 pass  # Skip tagging for unsupported containers like WAV
 
-            # Save synced lyrics if enabled
-            synced_lyrics = getattr(track_info, 'synced_lyrics', None)
-            if synced_lyrics and self.global_settings.get('lyrics', {}).get('save_synced_lyrics', True):
-                lrc_path = os.path.splitext(final_location)[0] + '.lrc'
-                try:
-                    def save_lrc():
-                        with open(lrc_path, 'w', encoding='utf-8') as f:
-                            f.write(synced_lyrics)
-                    await loop.run_in_executor(None, save_lrc)
-                except Exception as e:
-                    pass # Silently fail for lyrics saving
+            # Save synced lyrics (or plain lyrics fallback) as .lrc if enabled
+            if self.global_settings.get('lyrics', {}).get('save_synced_lyrics', True):
+                synced_lyrics = getattr(track_info, 'synced_lyrics', None)
+                # Fallback to plain lyrics if synced ones are missing, so the user gets a file as expected
+                lyrics_to_save = synced_lyrics or getattr(track_info, 'lyrics', None)
+                if lyrics_to_save:
+                    lrc_path = os.path.splitext(final_location)[0] + '.lrc'
+                    try:
+                        def save_lrc():
+                            with open(lrc_path, 'w', encoding='utf-8') as f:
+                                f.write(lyrics_to_save)
+                        await loop.run_in_executor(None, save_lrc)
+                    except Exception:
+                        pass # Silently fail for lyrics saving
             
             # Also tag the original file if it was kept (matching old version exactly)
             if old_track_location and old_container:
@@ -2484,11 +2515,7 @@ class Downloader:
             return return_with_blank_line("SKIPPED")
 
 
-        # Download lyrics
-        if self.global_settings['lyrics']['save_synced_lyrics'] and hasattr(track_info, 'lyrics') and track_info.lyrics:
-            d_print('Downloading lyrics')
-            with open(f'{os.path.splitext(track_location)[0]}.lrc', 'w', encoding='utf-8') as f:
-                f.write(track_info.lyrics)
+        # Audio is downloaded below - lyrics now handled after tagging to ensure they are fetched
 
         # Download audio
         try:
@@ -2795,15 +2822,18 @@ class Downloader:
             else:
                 pass  # Skip tagging for unsupported containers like WAV
 
-            # Save synced lyrics if enabled
-            synced_lyrics = getattr(track_info, 'synced_lyrics', None)
-            if synced_lyrics and self.global_settings.get('lyrics', {}).get('save_synced_lyrics', True):
-                lrc_path = os.path.splitext(final_location)[0] + '.lrc'
-                try:
-                    with open(lrc_path, 'w', encoding='utf-8') as f:
-                        f.write(synced_lyrics)
-                except Exception as e:
-                    pass # Silently fail for lyrics saving
+            # Save synced lyrics (or plain lyrics fallback) as .lrc if enabled
+            if self.global_settings.get('lyrics', {}).get('save_synced_lyrics', True):
+                synced_lyrics = getattr(track_info, 'synced_lyrics', None)
+                # Fallback to plain lyrics if synced ones are missing, so the user gets a file as expected
+                lyrics_to_save = synced_lyrics or getattr(track_info, 'lyrics', None)
+                if lyrics_to_save:
+                    lrc_path = os.path.splitext(final_location)[0] + '.lrc'
+                    try:
+                        with open(lrc_path, 'w', encoding='utf-8') as f:
+                            f.write(lyrics_to_save)
+                    except Exception:
+                        pass # Silently fail for lyrics saving
             
             # Also tag the original file if it was kept (matching old version exactly)
             if old_track_location and old_container:

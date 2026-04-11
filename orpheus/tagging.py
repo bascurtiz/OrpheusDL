@@ -6,9 +6,9 @@ from dataclasses import asdict
 
 from PIL import Image
 from mutagen.easyid3 import EasyID3
-from mutagen.easymp4 import EasyMP4
+from mutagen.mp4 import MP4
 from mutagen.flac import FLAC, Picture
-from mutagen.id3 import PictureType, APIC, USLT, TDAT, COMM, TPUB
+from mutagen.id3 import PictureType, APIC, USLT, TDAT, COMM, TPUB, TCON
 from mutagen.mp3 import EasyMP3
 from mutagen.mp4 import MP4Cover
 from mutagen.mp4 import MP4Tags
@@ -19,6 +19,7 @@ import mutagen
 
 from utils.exceptions import *
 from utils.models import ContainerEnum, TrackInfo
+from utils.utils import get_primary_artist
 
 # Needed for Windows tagging support
 MP4Tags._padding = 0
@@ -79,24 +80,24 @@ def tag_file(file_path: str, image_path: str, track_info: TrackInfo, credits_lis
         if tagger.tags is None:
             tagger.tags = EasyID3()  # Add EasyID3 tags if none are present
 
-        # Register encoded, rating, barcode, compatible_brands, major_brand and minor_version
+        # Register standard and fallback keys for EasyID3
         tagger.tags.RegisterTextKey('encoded', 'TSSE')
+        tagger.tags.RegisterTextKey('publisher', 'TPUB')
+        tagger.tags.RegisterTXXXKey('label', 'LABEL')
+        tagger.tags.RegisterTXXXKey('publisher_txxx', 'PUBLISHER')
+        tagger.tags.RegisterTXXXKey('recordlabel', 'RECORDLABEL')
+        tagger.tags.RegisterTXXXKey('upc', 'BARCODE')
+        tagger.tags.RegisterTXXXKey('barcode', 'BARCODE')
+        tagger.tags.RegisterTXXXKey('genre_txxx', 'GENRE')
         tagger.tags.RegisterTXXXKey('compatible_brands', 'compatible_brands')
         tagger.tags.RegisterTXXXKey('major_brand', 'major_brand')
         tagger.tags.RegisterTXXXKey('minor_version', 'minor_version')
         tagger.tags.RegisterTXXXKey('Rating', 'Rating')
-        tagger.tags.RegisterTXXXKey('upc', 'BARCODE')
+        tagger.tags.RegisterTXXXKey('track_url', 'TRACK_URL')
 
         tagger.tags.pop('encoded', None)
     elif container == ContainerEnum.m4a or container == ContainerEnum.mp4:
-        tagger = EasyMP4(file_path)
-
-        # Register ISRC, lyrics, cover and explicit tags
-        tagger.RegisterTextKey('isrc', '----:com.apple.itunes:ISRC')
-        tagger.RegisterTextKey('upc', '----:com.apple.itunes:UPC')
-        tagger.RegisterTextKey('explicit', 'rtng') if track_info.explicit is not None else None
-        tagger.RegisterTextKey('covr', 'covr')
-        tagger.RegisterTextKey('lyrics', '\xa9lyr') if embedded_lyrics else None
+        tagger = MP4(file_path)
     elif container == ContainerEnum.webm:
         tagger = mutagen.File(file_path)
         if tagger is None:
@@ -116,25 +117,45 @@ def tag_file(file_path: str, image_path: str, track_info: TrackInfo, credits_lis
         if 'encoder' in tagger.tags:
             del tagger.tags['encoder']
 
-    tagger['title'] = track_info.name
-    if track_info.album: tagger['album'] = track_info.album
-    if track_info.tags.album_artist:
-        album_artist_display = track_info.tags.album_artist
-        if isinstance(album_artist_display, list):
-            album_artist_display = album_artist_display[0] if album_artist_display else ""
-        
-        if container in {ContainerEnum.flac, ContainerEnum.ogg, ContainerEnum.opus, ContainerEnum.webm}:
-            # Use standard all-caps Vorbis comment for album artist
-            tagger['ALBUMARTIST'] = album_artist_display
+    if container == ContainerEnum.m4a or container == ContainerEnum.mp4:
+        # Raw MP4 atom names for standard tags
+        tagger['\xa9nam'] = [track_info.name]
+        if track_info.album: tagger['\xa9alb'] = [track_info.album]
+        if track_info.tags.album_artist:
+            album_artist_display = get_primary_artist(track_info.tags.album_artist)
+            tagger['aART'] = [album_artist_display]
+        if split_metadata:
+            tagger['\xa9ART'] = track_info.artists if isinstance(track_info.artists, list) else [track_info.artists]
         else:
-            tagger['albumartist'] = album_artist_display
-
-    if split_metadata:
-        tagger['artist'] = track_info.artists if isinstance(track_info.artists, list) else [track_info.artists]
+            tagger['\xa9ART'] = [metadata_separator.join(track_info.artists) if isinstance(track_info.artists, list) else track_info.artists]
     else:
-        tagger['artist'] = metadata_separator.join(track_info.artists) if isinstance(track_info.artists, list) else track_info.artists
+        tagger['title'] = track_info.name
+        if track_info.album: tagger['album'] = track_info.album
+        # Album artist
+        if track_info.tags.album_artist:
+            album_artist_display = get_primary_artist(track_info.tags.album_artist)
+            
+            if container in {ContainerEnum.flac, ContainerEnum.ogg, ContainerEnum.opus, ContainerEnum.webm}:
+                tagger['ALBUMARTIST'] = album_artist_display
+            else:
+                tagger['albumartist'] = album_artist_display
 
-    if container == ContainerEnum.m4a or container == ContainerEnum.mp4 or container == ContainerEnum.mp3:
+        if split_metadata:
+            tagger['artist'] = track_info.artists if isinstance(track_info.artists, list) else [track_info.artists]
+        else:
+            tagger['artist'] = metadata_separator.join(track_info.artists) if isinstance(track_info.artists, list) else track_info.artists
+
+    if container == ContainerEnum.m4a or container == ContainerEnum.mp4:
+        # MP4 uses tuple format: [(track_number, total_tracks)]
+        tn = track_info.tags.track_number or 0
+        tt = track_info.tags.total_tracks or 0
+        if tn or tt:
+            tagger['trkn'] = [(tn, tt)]
+        dn = track_info.tags.disc_number or 0
+        dt = track_info.tags.total_discs or 0
+        if dn or dt:
+            tagger['disk'] = [(dn, dt)]
+    elif container == ContainerEnum.mp3:
         if track_info.tags.track_number and track_info.tags.total_tracks:
             tagger['tracknumber'] = str(track_info.tags.track_number) + '/' + str(track_info.tags.total_tracks)
         elif track_info.tags.track_number:
@@ -149,79 +170,101 @@ def tag_file(file_path: str, image_path: str, track_info: TrackInfo, credits_lis
         if track_info.tags.total_tracks: tagger['totaltracks'] = str(track_info.tags.total_tracks)
         if track_info.tags.total_discs: tagger['totaldiscs'] = str(track_info.tags.total_discs)
 
-    if track_info.tags.release_date:
-        if container == ContainerEnum.mp3:
-            # Never access protected attributes, too bad! Only works on ID3v2.4, disabled for now!
-            # tagger.tags._EasyID3__id3._DictProxy__dict['TDRL'] = TDRL(encoding=3, text=track_info.tags.release_date)
-            # Use YYYY-MM-DD for consistency and convert it to DDMM
-            release_dd_mm = f'{track_info.tags.release_date[8:10]}{track_info.tags.release_date[5:7]}'
-            tagger.tags._EasyID3__id3._DictProxy__dict['TDAT'] = TDAT(encoding=3, text=release_dd_mm)
-            # Now add the year tag
-            tagger['date'] = str(track_info.release_year)
+    if container == ContainerEnum.m4a or container == ContainerEnum.mp4:
+        if track_info.tags.release_date:
+            tagger['\xa9day'] = [track_info.tags.release_date]
         else:
-            tagger['date'] = track_info.tags.release_date
+            tagger['\xa9day'] = [str(track_info.release_year)]
+        if track_info.tags.copyright:
+            tagger['cprt'] = [track_info.tags.copyright]
+        if track_info.tags.composer:
+            tagger['\xa9wrt'] = [metadata_separator.join(track_info.tags.composer) if isinstance(track_info.tags.composer, list) else track_info.tags.composer]
     else:
-        tagger['date'] = str(track_info.release_year)
-
-    if track_info.tags.copyright:tagger['copyright'] = track_info.tags.copyright
+        if track_info.tags.release_date:
+            if container == ContainerEnum.mp3:
+                release_dd_mm = f'{track_info.tags.release_date[8:10]}{track_info.tags.release_date[5:7]}'
+                tagger.tags._EasyID3__id3._DictProxy__dict['TDAT'] = TDAT(encoding=3, text=release_dd_mm)
+                tagger['date'] = str(track_info.release_year)
+            else:
+                tagger['date'] = track_info.tags.release_date
+        else:
+            tagger['date'] = str(track_info.release_year)
+        if track_info.tags.copyright: tagger['copyright'] = track_info.tags.copyright
+        if track_info.tags.composer:
+            if container == ContainerEnum.mp3:
+                tagger['composer'] = metadata_separator.join(track_info.tags.composer) if isinstance(track_info.tags.composer, list) else track_info.tags.composer
+            else:
+                tagger['COMPOSER'] = track_info.tags.composer
 
     if track_info.explicit is not None:
         if container == ContainerEnum.m4a or container == ContainerEnum.mp4:
-            tagger['explicit'] = b'\x01' if track_info.explicit else b'\x02'
+            tagger['rtng'] = [1 if track_info.explicit else 0]
         elif container == ContainerEnum.mp3:
             tagger['Rating'] = 'Explicit' if track_info.explicit else 'Clean'
         else:
             tagger['Rating'] = 'Explicit' if track_info.explicit else 'Clean'
 
-    if track_info.tags.genres: 
-        if split_metadata:
-            tagger['genre'] = track_info.tags.genres if isinstance(track_info.tags.genres, list) else [track_info.tags.genres]
+    if track_info.tags.genres:
+        if container == ContainerEnum.m4a or container == ContainerEnum.mp4:
+            if split_metadata:
+                tagger['\xa9gen'] = track_info.tags.genres if isinstance(track_info.tags.genres, list) else [track_info.tags.genres]
+            else:
+                tagger['\xa9gen'] = [metadata_separator.join(track_info.tags.genres) if isinstance(track_info.tags.genres, list) else track_info.tags.genres]
         else:
-            tagger['genre'] = metadata_separator.join(track_info.tags.genres) if isinstance(track_info.tags.genres, list) else track_info.tags.genres
+            if split_metadata:
+                tagger['genre'] = track_info.tags.genres if isinstance(track_info.tags.genres, list) else [track_info.tags.genres]
+            else:
+                tagger['genre'] = metadata_separator.join(track_info.tags.genres) if isinstance(track_info.tags.genres, list) else track_info.tags.genres
+            
     if track_info.tags.isrc:
         if container == ContainerEnum.m4a or container == ContainerEnum.mp4:
-            tagger['isrc'] = track_info.tags.isrc.encode()
+            tagger['----:com.apple.itunes:ISRC'] = [track_info.tags.isrc.encode()]
         elif container in {ContainerEnum.ogg, ContainerEnum.flac, ContainerEnum.opus, ContainerEnum.webm}:
             tagger['ISRC'] = track_info.tags.isrc
         else:
             tagger['isrc'] = track_info.tags.isrc
-            
+
     if track_info.tags.upc:
         if container == ContainerEnum.m4a or container == ContainerEnum.mp4:
-            tagger['upc'] = track_info.tags.upc.encode()
+            tagger['----:com.apple.itunes:BARCODE'] = [track_info.tags.upc.encode()]
         elif container in {ContainerEnum.ogg, ContainerEnum.flac, ContainerEnum.opus, ContainerEnum.webm}:
+            tagger['BARCODE'] = track_info.tags.upc
             tagger['UPC'] = track_info.tags.upc
         else:
-            tagger['UPC'] = track_info.tags.upc
+            tagger['upc'] = track_info.tags.upc
+            tagger['barcode'] = track_info.tags.upc
 
     # add the label tag
     if track_info.tags.label:
         if container in {ContainerEnum.flac, ContainerEnum.ogg, ContainerEnum.opus, ContainerEnum.webm}:
-            # Use list-style assignment for maximum VorbisComment compatibility
-            # However, if it's a list, join it with separator if it's not the label itself
-            tagger['LABEL'] = track_info.tags.label
-            tagger['PUBLISHER'] = track_info.tags.label
+            # ORGANIZATION only here — LABEL/PUBLISHER written after credits to prevent overwrite
             tagger['ORGANIZATION'] = track_info.tags.label
         elif container == ContainerEnum.mp3:
-            tagger.tags._EasyID3__id3._DictProxy__dict['TPUB'] = TPUB(
-                encoding=3,
-                text=track_info.tags.label
-            )
+            # Write ORGANIZATION via EasyID3 (maps to TPUB) — rest done as raw frames at the end
+            tagger['organization'] = track_info.tags.label
         elif container == ContainerEnum.m4a or container == ContainerEnum.mp4:
-            # only works with MP3TAG? https://docs.mp3tag.de/mapping/
-            tagger.RegisterTextKey('label', '\xa9pub')
-            tagger['label'] = track_info.tags.label
+            # \xa9pub = standard publisher atom (shows as PUBLISHER in Mp3tag)
+            # ----:com.apple.itunes:LABEL = freeform label atom
+            tagger['\xa9pub'] = [track_info.tags.label]
+            tagger['----:com.apple.itunes:LABEL'] = [track_info.tags.label.encode()]
+
+    # add the track url tag
+    if track_info.tags.track_url:
+        if container == ContainerEnum.m4a or container == ContainerEnum.mp4:
+            tagger['----:com.apple.itunes:TRACK_URL'] = [track_info.tags.track_url.encode()]
+        elif container in {ContainerEnum.ogg, ContainerEnum.flac, ContainerEnum.opus, ContainerEnum.webm}:
+            tagger['TRACK_URL'] = track_info.tags.track_url
+        else:
+            tagger['track_url'] = track_info.tags.track_url
 
     # add the description tag
     if track_info.tags.description and (container == ContainerEnum.m4a or container == ContainerEnum.mp4):
-        tagger.RegisterTextKey('desc', 'description')
-        tagger['description'] = track_info.tags.description
+        tagger['desc'] = [track_info.tags.description]
 
     # add comment tag
     if track_info.tags.comment:
         if container == ContainerEnum.m4a or container == ContainerEnum.mp4:
-            tagger.RegisterTextKey('comment', '\xa9cmt')
-            tagger['comment'] = track_info.tags.comment
+            tagger['\xa9cmt'] = [track_info.tags.comment]
         elif container == ContainerEnum.mp3:
             tagger.tags._EasyID3__id3._DictProxy__dict['COMM'] = COMM(
                 encoding=3,
@@ -236,9 +279,7 @@ def tag_file(file_path: str, image_path: str, track_info: TrackInfo, credits_lis
             tagger[key] = value
     elif container == ContainerEnum.m4a or container == ContainerEnum.mp4:
         for key, value in track_info.tags.extra_tags.items():
-            # Create a new freeform atom and set the extra_tags in bytes
-            tagger.RegisterTextKey(key, '----:com.apple.itunes:' + key)
-            tagger[key] = str(value).encode()
+            tagger['----:com.apple.itunes:' + key] = [str(value).encode()]
 
     # Group and merge duplicate credits automatically
     if credits_list:
@@ -260,7 +301,13 @@ def tag_file(file_path: str, image_path: str, track_info: TrackInfo, credits_lis
             
             credits_to_remove = []
             for credit_type, names in grouped_credits.items():
-                normalized_type = credit_type.replace('_', ' ').strip().lower()
+                normalized_type = credit_type.replace('_', ' ').replace('-', ' ').strip().lower()
+                
+                # Always remove music publisher credits as requested
+                if normalized_type == 'music publisher':
+                    credits_to_remove.append(credit_type)
+                    continue
+
                 if normalized_type in {'main artist', 'primary artist'}:
                     credit_names_lower = [n.lower() for n in names]
                     # Redundant if it matches the album artist exactly OR the track artist list
@@ -274,37 +321,57 @@ def tag_file(file_path: str, image_path: str, track_info: TrackInfo, credits_lis
 
         if container == ContainerEnum.m4a or container == ContainerEnum.mp4:
             for credit_type, names in grouped_credits.items():
-                tagger.RegisterTextKey(credit_type, '----:com.apple.itunes:' + credit_type)
                 if split_metadata:
-                    tagger[credit_type] = [name.encode() for name in names]
+                    tagger['----:com.apple.itunes:' + credit_type] = [name.encode() for name in names]
                 else:
-                    tagger[credit_type] = [metadata_separator.join(names).encode()]
+                    tagger['----:com.apple.itunes:' + credit_type] = [metadata_separator.join(names).encode()]
         elif container == ContainerEnum.mp3:
             for credit_type, names in grouped_credits.items():
-                tagger.tags.RegisterTXXXKey(credit_type.upper(), credit_type)
-                if split_metadata:
-                    # EasyID3 handles multiple values by passing them as a list
-                    tagger[credit_type] = names
-                else:
-                    tagger[credit_type] = metadata_separator.join(names)
+                key = credit_type.upper()
+                tagger.tags.RegisterTXXXKey(key, credit_type)
+                try:
+                    if split_metadata:
+                        tagger[key] = names
+                    else:
+                        tagger[key] = [metadata_separator.join(names)]
+                except Exception:
+                    pass
         else:
             for credit_type, names in grouped_credits.items():
                 try:
                     if split_metadata:
-                        tagger.tags[credit_type] = names
+                        tagger[credit_type] = names
                     else:
-                        tagger.tags[credit_type] = metadata_separator.join(names)
-                except:
+                        tagger[credit_type] = [metadata_separator.join(names)]
+                except Exception:
                     pass
+
+    # Re-apply label/publisher AFTER credits to prevent credit data from overwriting them
+    # (credits loop can overwrite these since VorbisComment keys are case-insensitive)
+    if track_info.tags.label:
+        if container in {ContainerEnum.flac, ContainerEnum.ogg, ContainerEnum.opus, ContainerEnum.webm}:
+            tagger['LABEL'] = track_info.tags.label
+            tagger['PUBLISHER'] = track_info.tags.label
+            tagger['ORGANIZATION'] = track_info.tags.label
+        elif container == ContainerEnum.mp3:
+            # Write publisher directly as raw ID3 frame to bypass EasyID3 key issues
+            tagger.tags._EasyID3__id3._DictProxy__dict['TPUB'] = TPUB(
+                encoding=3,
+                text=[track_info.tags.label]
+            )
+
 
     if embedded_lyrics:
         if container == ContainerEnum.mp3:
-            # Never access protected attributes, too bad! I hope I never have to write ID3 code again
-            tagger.tags._EasyID3__id3._DictProxy__dict['USLT'] = USLT(
+            # Use proper add() method for USLT frame
+            tagger.tags._EasyID3__id3.add(USLT(
                 encoding=3,
-                lang=u'eng',  # don't assume?
+                lang=u'eng',
+                desc=u'',
                 text=embedded_lyrics
-            )
+            ))
+        elif container == ContainerEnum.m4a or container == ContainerEnum.mp4:
+            tagger['\xa9lyr'] = [embedded_lyrics]
         else:
             tagger['lyrics'] = embedded_lyrics
 
@@ -401,7 +468,7 @@ def tag_file(file_path: str, image_path: str, track_info: TrackInfo, credits_lis
             pass
 
     try:
-        tagger.save(file_path, v1=2, v2_version=3, v23_sep=None) if container == ContainerEnum.mp3 else tagger.save()
+        tagger.save(file_path, v1=2, v2_version=3, v23_sep='; ') if container == ContainerEnum.mp3 else tagger.save()
     except OggVorbisHeaderError as ogg_header_error:
         # Check if it's the specific "unable to read full header" error for Ogg Vorbis
         if "unable to read full header" in str(ogg_header_error).lower():

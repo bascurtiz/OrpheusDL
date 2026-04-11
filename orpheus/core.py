@@ -375,7 +375,7 @@ class Orpheus:
             for current_session in new_module_sessions[i]['sessions'].values():
                 # For simple login type only, as it does not apply to advanced login
                 if self.module_settings[i].login_behaviour is ManualEnum.orpheus and not advanced_login_mode:
-                    hashes = {k:hash_string(str(v)) for k,v in module_settings[i].items()}
+                    hashes = {k:hash_string(str(v)) for k,v in module_settings.get(i, {}).items()}
                     if current_session.get('hashes'):
                         clear_session = any(k not in hashes or hashes[k] != v for k,v in current_session['hashes'].items() if k in self.module_settings[i].session_settings)
                     else:
@@ -447,13 +447,14 @@ def orpheus_core_download(orpheus_session: Orpheus, media_to_download, third_par
             for i in third_party_modules:
                 moduleselected = third_party_modules[i]
                 if moduleselected:
-                    if moduleselected not in orpheus_session.module_list:
+                    moduleselected_lower = moduleselected.lower()
+                    if moduleselected_lower not in orpheus_session.module_list:
                         raise Exception(f'{moduleselected} does not exist in modules.') # TODO: replace with InvalidModuleError
-                    elif i not in orpheus_session.module_settings[moduleselected].module_supported_modes:
+                    elif i not in orpheus_session.module_settings[moduleselected_lower].module_supported_modes:
                         raise Exception(f'Module {moduleselected} does not support {i}') # TODO: replace with ModuleDoesNotSupportAbility
                     else:
                         # If all checks pass, load up the selected module
-                        orpheus_session.load_module(moduleselected)
+                        orpheus_session.load_module(moduleselected_lower)
 
             downloader.third_party_modules = third_party_modules
 

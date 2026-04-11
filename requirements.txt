@@ -23,5 +23,7 @@ customtkinter
 packaging
 httpx
 async_lru==2.1.0
+pybase62
+unplayplay>=0.0.1
+pycryptodome
 pywinstyles
-flask>=3.0.0
