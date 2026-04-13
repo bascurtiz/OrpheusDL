@@ -265,6 +265,7 @@ class ModuleController:
 @dataclass
 class Tags:
     album_artist: Optional[str] = None
+    album_artists: Optional[list] = None
     composer: Optional[str] = None
     track_number: Optional[int] = None
     total_tracks: Optional[int] = None
@@ -308,6 +309,7 @@ class CreditsInfo:
 class AlbumInfo:
     name: str
     artist: str
+    # album_artists: list
     tracks: list
     release_year: int
     duration: Optional[int] = None  # Duration in whole seconds
