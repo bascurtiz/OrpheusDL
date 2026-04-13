@@ -38,6 +38,7 @@ class Orpheus:
                 "download_path": "./downloads/",
                 "download_quality": "hifi",
                 "search_limit": 25,
+                "disabled_search_platforms": [],
                 "concurrent_downloads": 5,
                 "progress_bar": False
             },
@@ -50,6 +51,8 @@ class Orpheus:
                 "playlist_format": "{name}",
                 "track_filename_format": "{artist} - {name}",
                 "single_full_path_format": "{artist} - {name}",
+                "metadata_separator": ";",
+                "split_metadata": True,
                 "enable_zfill": True,
                 "force_album_format": False
             },
@@ -116,7 +119,7 @@ class Orpheus:
         self.session_storage_location = os.path.join(self.data_folder_base, 'loginstorage.bin')
 
         os.makedirs('config', exist_ok=True)
-        self.settings = json.loads(open(self.settings_location, 'r').read()) if os.path.exists(self.settings_location) else {}
+        self.settings = json.loads(open(self.settings_location, 'r', encoding='utf-8').read()) if os.path.exists(self.settings_location) else {}
 
         try:
             if self.settings['global']['advanced']['debug_mode']: 
@@ -245,7 +248,8 @@ class Orpheus:
                             file_type = ImageFileTypeEnum[covers_settings.get('external_format', 'png')],
                             resolution = covers_settings.get('main_resolution', 1400),
                             compression = CoverCompressionEnum[covers_settings.get('main_compression', 'high')]
-                        )
+                        ),
+                        play_sound_on_finish = general_settings.get('play_sound_on_finish', True)
                     ),
                     gui_handlers = self.gui_handlers,
                     progress_bar_enabled = general_settings.get('progress_bar', True)
@@ -371,7 +375,7 @@ class Orpheus:
             for current_session in new_module_sessions[i]['sessions'].values():
                 # For simple login type only, as it does not apply to advanced login
                 if self.module_settings[i].login_behaviour is ManualEnum.orpheus and not advanced_login_mode:
-                    hashes = {k:hash_string(str(v)) for k,v in module_settings[i].items()}
+                    hashes = {k:hash_string(str(v)) for k,v in module_settings.get(i, {}).items()}
                     if current_session.get('hashes'):
                         clear_session = any(k not in hashes or hashes[k] != v for k,v in current_session['hashes'].items() if k in self.module_settings[i].session_settings)
                     else:
@@ -401,7 +405,7 @@ class Orpheus:
                 elif 'custom_data' in current_session: current_session.pop('custom_data')
 
         pickle.dump({'advancedmode': advanced_login_mode, 'modules': new_module_sessions}, open(self.session_storage_location, 'wb'))
-        open(self.settings_location, 'w').write(json.dumps(new_settings, indent = 4, sort_keys = False))
+        open(self.settings_location, 'w', encoding='utf-8').write(json.dumps(new_settings, indent = 4, sort_keys = False))
 
         if new_setting_detected:
             if self.settings.get('global', {}).get('advanced', {}).get('debug_mode', False):
@@ -443,13 +447,14 @@ def orpheus_core_download(orpheus_session: Orpheus, media_to_download, third_par
             for i in third_party_modules:
                 moduleselected = third_party_modules[i]
                 if moduleselected:
-                    if moduleselected not in orpheus_session.module_list:
+                    moduleselected_lower = moduleselected.lower()
+                    if moduleselected_lower not in orpheus_session.module_list:
                         raise Exception(f'{moduleselected} does not exist in modules.') # TODO: replace with InvalidModuleError
-                    elif i not in orpheus_session.module_settings[moduleselected].module_supported_modes:
+                    elif i not in orpheus_session.module_settings[moduleselected_lower].module_supported_modes:
                         raise Exception(f'Module {moduleselected} does not support {i}') # TODO: replace with ModuleDoesNotSupportAbility
                     else:
                         # If all checks pass, load up the selected module
-                        orpheus_session.load_module(moduleselected)
+                        orpheus_session.load_module(moduleselected_lower)
 
             downloader.third_party_modules = third_party_modules
 

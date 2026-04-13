@@ -10,6 +10,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import threading
 import uuid
 from pathlib import Path
@@ -24,6 +25,8 @@ ORPHEUS_PY = ORPHEUS_DIR / "orpheus.py"
 
 # In-memory job store  {job_id: {"status": ..., "log": [...], "progress": 0}}
 jobs: dict[str, dict] = {}
+# Active process tracking {job_id: subprocess.Popen}
+active_procs: dict[str, subprocess.Popen] = {}
 
 
 # ── HELPERS ──────────────────────────────────────────────────────────────────
@@ -32,71 +35,142 @@ def run_orpheus(args: list[str], job_id: str):
     """Run orpheus.py in a background thread and stream output to job log."""
     job = jobs[job_id]
     job["status"] = "running"
-    cmd = ["python", "-u", str(ORPHEUS_PY)] + args + ["--progress"]
+    cmd = [sys.executable, "-u", str(ORPHEUS_PY)] + args + ["--progress"]
     ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-    progress_re = re.compile(r'(\d+)%')
-    # tqdm progress bar lines look like: "33%|####2  | 6.29M/19.2M [00:00<00:01, 8.31MB/s]"
+    
+    # Progress Parsing Regexes
+    progress_re = re.compile(r'(?:\s|^)(\d+)%(?:\s|\||$)')
     tqdm_re = re.compile(r'^\d+%\|')
+    track_re = re.compile(r'(?:Track|Playlist item|Playlist|Release item)?\s*(\d+)/(\d+)', re.IGNORECASE)
+    album_re = re.compile(r'(?:Album|Release)\s*(\d+)/(\d+)', re.IGNORECASE)
+    # Generic "Number of..." to catch total counts early
+    total_counts_re = re.compile(r'Number of (?:albums|releases|tracks|items):\s*(\d+)', re.IGNORECASE)
+
+    # Multi-level progress tracking
+    global_curr = 1
+    global_total = 0
 
     try:
         proc = subprocess.Popen(
             cmd,
             cwd=str(ORPHEUS_DIR),
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            bufsize=1,
-            universal_newlines=True
+            encoding='utf-8',
+            errors='replace',
+            universal_newlines=True,
+            env={**os.environ, "ORPHEUS_GUI": "1", "PYTHONUTF8": "1"}
         )
+        active_procs[job_id] = proc
 
-        for line in proc.stdout:
-            # Handle carriage returns from tqdm or other progress indicators
-            if '\r' in line:
-                # Split by \r and take the last part that has content
-                parts = line.split('\r')
-                line = parts[-1] if parts[-1].strip() else (parts[-2] if len(parts) > 1 else parts[0])
-            
-            line = ansi_escape.sub('', line)
-            line = line.strip('\r\n').strip()
-            if not line: continue
+        for line in iter(proc.stdout.readline, ''):
+            # Handle carriage returns from tqdm or concurrent progress updates
+            # Treating each \r as a newline ensures all status updates are processed and logged
+            for l in line.replace('\r', '\n').splitlines():
+                l = ansi_escape.sub('', l).strip()
+                if not l: continue
 
-            # Whitelist search result lines: if it has metadata tags, it's NOT a logo
-            if '|PLATFORM|' in line and '|ID|' in line:
-                pass
-            else:
-                # Filter out the ASCII logo
-                logo_markers = ['____', '/  \\', '|  |', '|__|', '\\____']
-                if any(marker in line for marker in logo_markers):
+                # Filter out noisy download metrics
+                if "Download speed:" in l or "Download time:" in l:
                     continue
-           
-            # Simple progress parsing
-            # Look for percentage (tqdm style: " 10%|#   |")
-            pm = progress_re.search(line)
-            if pm:
-                jobs[job_id]["progress"] = int(pm.group(1))
-            elif "Downloading" in line:
-                if jobs[job_id]["progress"] < 10:
-                    jobs[job_id]["progress"] = 10
-            elif "Done" in line or "Success" in line:
-                jobs[job_id]["progress"] = 100
 
-            # Skip tqdm progress bar lines from the visible log (they clutter output)
-            # Progress percentage is already extracted above.
-            if tqdm_re.match(line):
-                continue
+                # Whitelist search result lines: if it has metadata tags, it's NOT a logo
+                if '|PLATFORM|' in l and '|ID|' in l:
+                    pass
+                else:
+                    # Filter out the ASCII logo
+                    logo_markers = ['____', '/  \\', '|  |', '|__|', '\\____']
+                    if any(marker in l for marker in logo_markers):
+                        continue
+               
+                # --- Progress Parsing ---
+                
+                # 1. Detect Global Scope
+                tm = track_re.search(l)
+                if tm:
+                    global_curr = int(tm.group(1))
+                    global_total = int(tm.group(2))
+                
+                am = album_re.search(l)
+                if am:
+                    global_curr = int(am.group(1))
+                    global_total = int(am.group(2))
 
-            jobs[job_id]["log"].append(line)
+                tcm = total_counts_re.search(l)
+                if tcm:
+                    global_total = int(tcm.group(1))
 
-            
+                # 2. Progress Calculation
+                if global_total > 0:
+                    # Current Completed / Total (base progress of current track)
+                    gc = max(1, global_curr)
+                    prog = int(((gc - 1) / global_total) * 100)
+                    
+                    if prog >= 100: prog = 98  # Cap at 98% until fully 'Done'
+                    if prog > jobs[job_id]["progress"]:
+                        jobs[job_id]["progress"] = prog
+                
+                # 3. Percentage-based fallback (tqdm style)
+                pm = progress_re.search(l)
+                if pm:
+                    val = int(pm.group(1))
+                    # Scale if we have a global context
+                    if global_total > 0:
+                        gc = max(1, global_curr)
+                        val = int(((gc - 1) + (val / 100)) / global_total * 100)
+                    
+                    if val >= 100: val = 98 # NEVER let the loop hit 100%
+                    
+                    if val > jobs[job_id].get("progress", 0):
+                        jobs[job_id]["progress"] = val
+                elif "Downloading" in l:
+                    if jobs[job_id]["progress"] < 5:
+                        jobs[job_id]["progress"] = 5
+
+                # --- Advanced Log Cleaning ---
+                
+                # 1. Broadly identify progress bars (anywhere in the line)
+                is_bar = '%|' in l or 'it/s]' in l or 'B/s]' in l
+                
+                # 2. If it's a progress bar, try to see if it ALSO contains a track marker
+                # Concurrent mode often merges them: "BAR   1/46 + Name"
+                if is_bar:
+                    # Attempt to extract a track status line from it
+                    track_match = track_re.search(l)
+                    if track_match:
+                        # Re-process just the track part
+                        # Find where the track index starts and keep only that to the end
+                        start_idx = l.find(track_match.group(0))
+                        l = l[start_idx:].strip()
+                        is_bar = False # It's now a valid track line
+                    else:
+                        continue # It's just a pure progress update, skip it
+
+                # 3. Final Noise Filter (Logo, Speed Metrics, TQDM artifacts)
+                noise_markers = ['speed:', 'time:', 'ETA', 'it/s', 'B/s', '█', '░', '▒', '▓']
+                if any(m in l for m in noise_markers) and '===' not in l:
+                    continue
+
+                jobs[job_id]["log"].append(l)
+                # Keep logs manageable but sufficient for large batches
+                if len(jobs[job_id]["log"]) > 5000:
+                    jobs[job_id]["log"].pop(0)
+
+
         proc.wait()
         if proc.returncode == 0:
             jobs[job_id]["status"] = "done"
             jobs[job_id]["progress"] = 100
-        else:
+        elif jobs[job_id].get("status") != "stopped":
             jobs[job_id]["status"] = "error"
     except Exception as e:
         job["log"].append(f"ERROR: {e}")
         job["status"] = "error"
+    finally:
+        if job_id in active_procs:
+            del active_procs[job_id]
 
 
 # ── ROUTES ───────────────────────────────────────────────────────────────────
@@ -121,7 +195,7 @@ def api_download():
     if not url:
         return jsonify({"error": "No URL provided"}), 400
 
-    args = []
+    args = ["--non-interactive"]
     if quality:
         args += ["--quality", quality.lower()]
     args.append(url)
@@ -135,6 +209,34 @@ def api_download():
 
 
 # ── SEARCH ──
+
+@app.route("/api/job/stop/<job_id>", methods=["POST"])
+def api_job_stop(job_id):
+    """Terminate an active job."""
+    if job_id in active_procs:
+        try:
+            proc = active_procs[job_id]
+            if os.name == 'nt':
+                # Windows: Use taskkill to forcefully terminate the process tree (/T)
+                subprocess.run(['taskkill', '/F', '/T', '/PID', str(proc.pid)], capture_output=True)
+            else:
+                proc.terminate() # Try graceful SIGTERM
+                # If it doesn't die in 2 seconds, kill it
+                def force_kill():
+                    import time
+                    time.sleep(2)
+                    if proc.poll() is None: proc.kill()
+                threading.Thread(target=force_kill).start()
+            
+            if job_id in jobs:
+                jobs[job_id]["status"] = "stopped"
+                jobs[job_id]["log"].append("--- JOB STOPPED BY USER ---")
+            
+            return jsonify({"status": "success"})
+        except Exception as e:
+            return jsonify({"status": "error", "message": str(e)}), 500
+    return jsonify({"status": "error", "message": "Job not active"}), 404
+
 
 @app.route("/api/search", methods=["POST"])
 def api_search():
@@ -207,7 +309,7 @@ def api_search_download():
     url = result["id"]
     platform = result["platform"]
 
-    args = []
+    args = ["--non-interactive"]
     if quality:
         args += ["--quality", quality.lower()]
     
@@ -295,7 +397,10 @@ def api_settings_get():
         return jsonify({"error": "settings.json not found"}), 404
     try:
         with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-            return jsonify(json.load(f))
+            resp = jsonify(json.load(f))
+            resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            resp.headers["Pragma"] = "no-cache"
+            return resp
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -321,7 +426,10 @@ def api_settings_raw():
         return jsonify({"error": "settings.json not found"}), 404
     try:
         with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-            return jsonify({"raw": f.read()})
+            resp = jsonify({"raw": f.read()})
+            resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            resp.headers["Pragma"] = "no-cache"
+            return resp
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

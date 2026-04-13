@@ -4,7 +4,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>OrpheusDL</title>
+  <title>OrpheusDL - Web UI</title>
+  <link rel="icon" type="image/png" href="icon.png">
   <link
     href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;700&family=Inter:wght@400;600;700;800&display=swap"
     rel="stylesheet">
@@ -19,6 +20,17 @@
       --card-border: rgba(255, 255, 255, 0.08);
       --glass-blur: blur(12px);
       --transition: all 0.3s ease;
+
+      /* Log Colors */
+      --log-white: #E4E5E6;
+      --log-gray: #94a3b8;
+      --log-secondary: #94a3b8;
+      --log-label: #94a3b8;
+      --log-link: #1F6AA5;
+      --log-link-hover: #4A9EFF;
+      --log-warning: #F2C94C;
+      --log-error: #FF5252;
+      --log-success: #00C851;
     }
 
     * {
@@ -40,26 +52,76 @@
     }
 
     .dl-log {
-      background: rgba(0,0,0,0.3);
-      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(255, 255, 255, 0.1);
       padding: 12px;
-      font-family: monospace;
+      font-family: "Roboto Mono", monospace;
       font-size: 11px;
-      color: var(--text-muted);
-      max-height: 200px;
+      color: var(--log-secondary);
+      max-height: 400px;
       overflow-y: auto;
       border-radius: 8px;
       white-space: pre-wrap;
       word-break: break-all;
+      line-height: 1.5;
     }
+
     .dl-log a {
-      color: var(--accent-1);
+      color: var(--log-link);
       text-decoration: underline;
       font-weight: 500;
     }
+
     .dl-log a:hover {
-      color: #fff;
+      color: var(--log-link-hover);
       text-decoration: none;
+    }
+
+    /* Log Formatting Utility Classes */
+    .log-white {
+      color: var(--log-white);
+      font-weight: 500;
+    }
+
+    .log-secondary {
+      color: var(--log-secondary);
+    }
+
+    .log-gray {
+      color: var(--log-gray);
+    }
+
+    .log-warning {
+      color: var(--log-warning);
+    }
+
+    .log-error {
+      color: var(--log-error);
+      font-weight: 600;
+    }
+
+    .log-success {
+      color: var(--log-success);
+      font-weight: 600;
+    }
+
+    .log-label {
+      color: var(--log-secondary);
+      font-weight: 400;
+    }
+
+    .log-value {
+      color: var(--log-white);
+      font-weight: 500;
+    }
+
+    .log-bold {
+      font-weight: 700;
+    }
+
+    .log-icon {
+      font-family: "Inter", sans-serif;
+      margin-right: 4px;
     }
 
     ::-webkit-scrollbar-thumb {
@@ -236,9 +298,9 @@
     /* ── PAGE HEADER ── */
     .page-eyebrow {
       font-family: "Inter", sans-serif;
-      font-size: 11px;
+      font-size: 18px;
       font-weight: 800;
-      letter-spacing: 2px;
+      letter-spacing: 0.5px;
       color: #fff;
       margin-bottom: 12px;
     }
@@ -429,10 +491,10 @@
     }
 
     .glass-btn.success {
-      background: rgba(34, 197, 94, 0.12) !important;
-      color: #4ade80 !important;
-      border: 1px solid rgba(34, 197, 94, 0.5) !important;
-      box-shadow: 0 4px 12px rgba(34, 197, 94, 0.15) !important;
+      background: rgba(0, 200, 81, 0.12) !important;
+      color: #00C851 !important;
+      border: 1px solid rgba(0, 200, 81, 0.5) !important;
+      box-shadow: 0 4px 12px rgba(0, 200, 81, 0.15) !important;
     }
 
     /* ── SEARCH ROW ── */
@@ -455,8 +517,10 @@
     .result-item {
       display: flex;
       align-items: center;
-      gap: 12px;
-      padding: 12px 14px;
+      gap: 6px;
+      /* Reduced from 10px */
+      padding: 8px 4px;
+      /* Reduced from 12px 8px */
       border-radius: 12px;
       cursor: pointer;
       transition: var(--transition);
@@ -475,6 +539,216 @@
       transform: translateX(6px);
     }
 
+    /* ── SETUP GUIDES ── */
+    .setup-guide-card {
+      background: var(--card-bg);
+      backdrop-filter: var(--glass-blur);
+      -webkit-backdrop-filter: var(--glass-blur);
+      border: 1px solid var(--card-border);
+      border-radius: 20px;
+      margin-top: 14px;
+      margin-bottom: 24px;
+      /* Space before Save button */
+      padding: 0;
+      overflow: hidden;
+      transition: var(--transition);
+    }
+
+    .guide-collapsible-header {
+      padding: 16px 22px;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      user-select: none;
+      transition: background 0.2s;
+    }
+
+    .guide-collapsible-header:hover {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .guide-collapse-content {
+      padding: 0 22px 22px 22px;
+      display: none;
+      font-size: 11px;
+    }
+
+    .guide-collapse-content.expanded {
+      display: block;
+      animation: slideDown 0.3s ease;
+    }
+
+    .guide-arrow {
+      font-size: 10px;
+      color: var(--text-muted);
+      transition: transform 0.3s;
+    }
+
+    .guide-arrow.expanded {
+      transform: rotate(180deg);
+    }
+
+    @keyframes slideDown {
+      from {
+        opacity: 0;
+        transform: translateY(-10px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .guide-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .guide-icon {
+      font-size: 18px;
+      line-height: 1;
+    }
+
+    .guide-title {
+      font-family: "Inter", sans-serif;
+      font-size: 14px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .guide-columns {
+      display: flex;
+      gap: 30px;
+      flex-wrap: wrap;
+    }
+
+    .guide-column {
+      flex: 1;
+      min-width: 280px;
+    }
+
+    .guide-steps {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .guide-step {
+      display: flex;
+      gap: 12px;
+      font-size: 11px;
+      line-height: 1.6;
+    }
+
+    .step-number {
+      font-weight: 700;
+      color: #fff;
+      min-width: 18px;
+      font-size: 11px;
+    }
+
+    .step-content {
+      color: var(--text-muted);
+      flex: 1;
+      font-size: 11px;
+    }
+
+    .step-content b {
+      color: var(--text-color);
+    }
+
+    .guide-link {
+      color: var(--accent-1);
+      text-decoration: underline;
+      cursor: pointer;
+    }
+
+    .guide-link:hover {
+      color: #6db3ff;
+    }
+
+    .guide-bullet {
+      display: block;
+      padding-left: 15px;
+      position: relative;
+      margin-top: 4px;
+      font-size: 11px;
+    }
+
+    .guide-bullet::before {
+      content: "•";
+      position: absolute;
+      left: 0;
+      color: var(--text-muted);
+    }
+
+    .recommended-values {
+      margin-top: 10px;
+    }
+
+    .value-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+      font-size: 11px;
+    }
+
+    .value-label {
+      color: var(--text-muted);
+      min-width: 100px;
+      font-size: 11px;
+    }
+
+    .value-text {
+      color: var(--accent-1);
+      font-family: "Roboto Mono", monospace;
+      background: rgba(74, 158, 255, 0.08);
+      padding: 2px 6px;
+      border-radius: 4px;
+      word-break: break-all;
+      font-size: 11px;
+    }
+
+    .copy-btn {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--card-border);
+      color: var(--text-muted);
+      width: 22px;
+      height: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 11px;
+      transition: var(--transition);
+      flex-shrink: 0;
+    }
+
+    .copy-btn:hover {
+      color: #fff;
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    .demo-btn-container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 0;
+    }
+
+    .small-glass-btn {
+      padding: 5px 12px;
+      font-size: 10px;
+      border-radius: 20px;
+    }
+
     .result-item.selected {
       background: rgba(74, 158, 255, 0.08);
       border-color: rgba(74, 158, 255, 0.3);
@@ -484,9 +758,11 @@
       font-family: "Roboto Mono", monospace;
       font-size: 11px;
       color: var(--text-muted);
-      min-width: 24px;
-      text-align: center;
+      min-width: 14px;
+      /* Reduced from 20px */
+      text-align: right;
       opacity: 0.6;
+      margin-right: 4px;
     }
 
     .result-info {
@@ -696,9 +972,82 @@
     }
 
     .setting-label {
-      font-size: 13px;
-      font-weight: 500;
+      font-size: 11px;
+      font-weight: 600;
       color: var(--text-color);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .setting-row input[type="text"],
+    .setting-row input[type="password"],
+    .setting-row select,
+    .setting-row textarea {
+      font-size: 11px !important;
+      padding: 8px 12px !important;
+      border-radius: 8px !important;
+    }
+
+    .help-icon {
+      width: 15px;
+      height: 15px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--card-border);
+      color: var(--text-muted);
+      font-size: 10px;
+      font-weight: 800;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: var(--transition);
+      user-select: none;
+      font-family: "Inter", sans-serif;
+    }
+
+    .help-icon:hover {
+      background: rgba(74, 158, 255, 0.15);
+      border-color: var(--accent-1);
+      color: #fff;
+    }
+
+    .help-icon.active {
+      background: var(--accent-1) !important;
+      border-color: var(--accent-1) !important;
+      color: #fff !important;
+      box-shadow: 0 0 10px var(--accent-1);
+    }
+
+    /* ── CUSTOM TOOLTIP ── */
+    #custom-tooltip {
+      position: fixed;
+      z-index: 10000;
+      background: rgba(15, 15, 20, 0.9);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid var(--accent-1);
+      border-radius: 10px;
+      padding: 10px 16px;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 500;
+      max-width: 260px;
+      text-align: center;
+      line-height: 1.5;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+      pointer-events: none;
+      opacity: 0;
+      transform: translateY(10px);
+      transition: opacity 0.2s ease, transform 0.2s ease;
+      display: none;
+    }
+
+    #custom-tooltip.visible {
+      display: block;
+      opacity: 1;
+      transform: translateY(0);
     }
 
     .setting-desc {
@@ -773,15 +1122,15 @@
     }
 
     .badge-red {
-      background: rgba(239, 68, 68, 0.12);
-      color: #f87171;
-      border: 1px solid rgba(239, 68, 68, 0.25);
+      background: rgba(255, 82, 82, 0.12);
+      color: #FF5252;
+      border: 1px solid rgba(255, 82, 82, 0.25);
     }
 
     .badge-green {
-      background: rgba(34, 197, 94, 0.12);
-      color: #4ade80;
-      border: 1px solid rgba(34, 197, 94, 0.25);
+      background: rgba(0, 200, 81, 0.12);
+      color: #00C851;
+      border: 1px solid rgba(0, 200, 81, 0.25);
     }
 
     /* Platform pills colored only when selected */
@@ -838,6 +1187,27 @@
       background: rgba(255, 0, 0, 0.15);
       color: #FF0000;
       border-color: rgba(255, 0, 0, 0.35);
+    }
+
+    /* Override for Settings -> Search Platforms grid (Opt-Out style) */
+    #search-platforms-grid .platform-pill {
+      opacity: 0.5;
+      /* Muted when not selected */
+      border-color: rgba(255, 255, 255, 0.1);
+      transition: all 0.2s ease;
+    }
+
+    #search-platforms-grid .platform-pill.selected {
+      opacity: 1;
+      /* Fully visible when selected */
+      background: rgba(74, 158, 255, 0.08);
+      /* Matches .platform-pill:hover */
+      color: var(--text-color) !important;
+      /* Matches .platform-pill:hover */
+      border-color: rgba(74, 158, 255, 0.3) !important;
+      /* Matches .platform-pill:hover */
+      box-shadow: none;
+      transform: translateY(-1px);
     }
 
     /* ── GHOST BTN ── */
@@ -1043,7 +1413,7 @@
       <div class="glass-card">
         <div class="card-label blue">URL</div>
         <div style="display:flex; gap:8px; align-items:center;">
-          <input type="text" id="url-input" placeholder="https://soundcloud.com/artist/track-name"
+          <input type="text" id="url-input" placeholder="https://tidal.com/track/123456789"
             style="flex:1; min-width:0;" />
           <button class="ghost-btn"
             style="padding:10px; border-radius:50%; width:38px; height:38px; display:flex; align-items:center; justify-content:center; flex-shrink:0; border:1.5px solid var(--card-border);"
@@ -1089,11 +1459,11 @@
       <div class="glass-card">
         <div class="card-label blue">DOWNLOAD FOLDER</div>
         <div style="display:flex; gap:10px; align-items:center;">
-          <input type="text" id="url-download-folder" value="downloads" style="flex:1; min-width:0;" />
+          <input type="text" id="url-download-folder" data-path="global.general.download_path" value="downloads" style="flex:1; min-width:0;" />
           <div style="display:flex; flex-direction:column; gap:6px;">
             <button class="ghost-btn"
               style="height:30px; display:inline-flex; align-items:center; justify-content:center; padding:0 12px; font-size:11px; font-family:'Roboto Mono', monospace; font-weight:700; letter-spacing:0.5px; min-width:75px; border-radius:8px; color:var(--text-muted);"
-              onclick="openFolderPicker('url-download-folder')">Browse</button>
+              onclick="openFolderPicker('url-download-folder')">Set</button>
             <button class="ghost-btn"
               style="height:30px; display:inline-flex; align-items:center; justify-content:center; padding:0 12px; font-size:11px; font-family:'Roboto Mono', monospace; font-weight:700; letter-spacing:0.5px; min-width:75px; border-radius:8px; color:var(--text-color);"
               onclick="openDownloadBrowser('url-download-folder')">Open</button>
@@ -1120,7 +1490,12 @@
               <div style="font-size:11px; color:var(--text-muted); margin-top:3px;" id="dl-track-meta">See log below for
                 track details</div>
             </div>
-            <span class="badge badge-blue" id="dl-status">Downloading</span>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <button id="dl-stop-btn" class="ghost-btn"
+                style="display:none; color:#f87171; border-color:rgba(248,113,113,0.3); padding:4px 8px; font-size:10px; height:22px;"
+                onclick="stopJob(activeJobId)">Stop</button>
+              <span class="badge badge-blue" id="dl-status">Downloading</span>
+            </div>
           </div>
           <div class="progress-bar">
             <div class="progress-fill" id="dl-bar" style="width:0%"></div>
@@ -1183,7 +1558,9 @@
               <line x1="6" y1="6" x2="18" y2="18"></line>
             </svg>
           </button>
-          <button class="glass-btn primary" onclick="doSearch()" style="padding:0; width:38px; height:38px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; border-radius:50%;" title="Search">
+          <button id="search-btn" class="glass-btn primary" onclick="doSearch()"
+            style="padding:0; width:38px; height:38px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; border-radius:50%;"
+            title="Search">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
               stroke-linecap="round" stroke-linejoin="round">
               <circle cx="11" cy="11" r="8" />
@@ -1239,20 +1616,12 @@
         <div class="glass-card">
           <div class="card-label blue">GENERAL</div>
           <div class="setting-row">
-            <div class="setting-label" title="Folder where downloads are saved">Output Path</div>
+            <div class="setting-label" title="The main folder where all downloads will be saved.">Output Path <div
+                class="help-icon">?</div>
+            </div>
             <div style="display:flex;gap:8px;align-items:center;flex:1;justify-content:flex-end;min-width:200px;">
               <input type="text" id="global-download_path" data-path="global.general.download_path"
                 style="flex:1; min-width:0;" />
-              <button class="ghost-icon-btn" type="button" title="Open Download Browser" aria-label="Open Browser"
-                style="height:30px; width:30px; display:inline-flex; align-items:center; justify-content:center; padding:0; border-radius:8px;"
-                onclick="openDownloadBrowser('global-download_path')">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                  stroke-linejoin="round">
-                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                  <polyline points="15 3 21 3 21 9" />
-                  <line x1="10" y1="14" x2="21" y2="3" />
-                </svg>
-              </button>
               <button class="ghost-icon-btn" type="button" title="Browse folders" aria-label="Browse"
                 style="height:30px; width:30px; display:inline-flex; align-items:center; justify-content:center; padding:0; border-radius:8px;"
                 onclick="openFolderPicker('global-download_path')">
@@ -1263,10 +1632,22 @@
                   <path d="M8 12h8" />
                 </svg>
               </button>
+              <button class="ghost-icon-btn" type="button" title="Open Download Browser" aria-label="Open Browser"
+                style="height:30px; width:30px; display:inline-flex; align-items:center; justify-content:center; padding:0; border-radius:8px;"
+                onclick="openDownloadBrowser('global-download_path')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                  stroke-linejoin="round">
+                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                  <polyline points="15 3 21 3 21 9" />
+                  <line x1="10" y1="14" x2="21" y2="3" />
+                </svg>
+              </button>
             </div>
           </div>
           <div class="setting-row">
-            <div class="setting-label" title="Default audio quality used for downloads">Quality</div>
+            <div class="setting-label" title="Select the desired audio quality preference.">Quality <div
+                class="help-icon">?</div>
+            </div>
             <select id="global-download_quality" data-path="global.general.download_quality" style="width:180px;">
               <option value="hifi">hifi</option>
               <option value="lossless">lossless</option>
@@ -1275,12 +1656,25 @@
             </select>
           </div>
           <div class="setting-row">
-            <div class="setting-label" title="Maximum number of search results returned per platform">Search Limit</div>
+            <div class="setting-label" title="Maximum number of results to display in the Search tab.">Search Limit <div
+                class="help-icon">?</div>
+            </div>
             <input type="text" id="global-search_limit" data-path="global.general.search_limit"
               style="width:80px;text-align:center;" />
           </div>
+          <div class="setting-row" style="flex-direction:column; align-items:flex-start; gap:12px;">
+            <div class="setting-label" title="Platforms to include when searching with 'All' selected.">
+              Search 'all' platforms <div class="help-icon">?</div>
+            </div>
+            <div id="search-platforms-grid" class="platform-grid" style="padding-left: 4px;">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
           <div class="setting-row">
-            <div class="setting-label" title="Number of tracks downloaded simultaneously">Concurrent Downloads</div>
+            <div class="setting-label"
+              title="Number of tracks to download simultaneously (1-10).&#10;&#10;Recommended values:&#10;• 1-3: Slower systems, limited bandwidth&#10;• 4-6: Most systems (balanced speed/stability)&#10;• 7-10: High-end systems, fast internet.">
+              Concurrent Downloads <div class="help-icon">?</div>
+            </div>
             <div style="display:flex;align-items:center;gap:10px;">
               <input type="range" id="global-concurrent_downloads" data-path="global.general.concurrent_downloads"
                 min="1" max="10" step="1" style="width:140px;"
@@ -1293,12 +1687,16 @@
         <div class="glass-card">
           <div class="card-label blue">CODECS</div>
           <div class="setting-row">
-            <div class="setting-label" title="Allow downloading proprietary codecs like MQA or AC-4">Proprietary Codecs</div>
+            <div class="setting-label" title="Enable potentially proprietary codecs like MQA (if supported by module).">
+              Proprietary Codecs <div class="help-icon">?</div>
+            </div>
             <div class="toggle" id="global-proprietary_codecs" data-path="global.codecs.proprietary_codecs"
               onclick="this.classList.toggle('on')"></div>
           </div>
           <div class="setting-row">
-            <div class="setting-label" title="Allow downloading spatial audio formats like Dolby Atmos or 360 Reality Audio">Spatial Codecs</div>
+            <div class="setting-label" title="Enable spatial audio codecs like Dolby Atmos (if supported by module).">
+              Spatial Codecs <div class="help-icon">?</div>
+            </div>
             <div class="toggle" id="global-spatial_codecs" data-path="global.codecs.spatial_codecs"
               onclick="this.classList.toggle('on')"></div>
           </div>
@@ -1307,17 +1705,23 @@
         <div class="glass-card">
           <div class="card-label blue">MODULE DEFAULTS</div>
           <div class="setting-row">
-            <div class="setting-label" title="Which module is preferred for fetching lyrics (default = the platform being downloaded from)">Lyrics Module</div>
+            <div class="setting-label" title="Default module to use for fetching lyrics.">Lyrics Module <div
+                class="help-icon">?</div>
+            </div>
             <input type="text" id="global-module_lyrics" data-path="global.module_defaults.lyrics"
               style="width:160px;" />
           </div>
           <div class="setting-row">
-            <div class="setting-label" title="Which module is preferred for fetching covers (default = the platform being downloaded from)">Covers Module</div>
+            <div class="setting-label" title="Default module to use for fetching cover art.">Covers Module <div
+                class="help-icon">?</div>
+            </div>
             <input type="text" id="global-module_covers" data-path="global.module_defaults.covers"
               style="width:160px;" />
           </div>
           <div class="setting-row">
-            <div class="setting-label" title="Which module is preferred for fetching credits (default = the platform being downloaded from)">Credits Module</div>
+            <div class="setting-label" title="Default module to use for fetching track credits.">Credits Module <div
+                class="help-icon">?</div>
+            </div>
             <input type="text" id="global-module_credits" data-path="global.module_defaults.credits"
               style="width:160px;" />
           </div>
@@ -1326,17 +1730,23 @@
         <div class="glass-card">
           <div class="card-label blue">LYRICS</div>
           <div class="setting-row">
-            <div class="setting-label" title="Embed unsynced lyrics into the audio file as a tag">Embed Lyrics</div>
+            <div class="setting-label" title="Embed standard (unsynced) lyrics into the audio file.">Embed Lyrics <div
+                class="help-icon">?</div>
+            </div>
             <div class="toggle" id="global-embed_lyrics" data-path="global.lyrics.embed_lyrics"
               onclick="this.classList.toggle('on')"></div>
           </div>
           <div class="setting-row">
-            <div class="setting-label" title="Embed time-synced (LRC) lyrics into the audio file">Embed Synced Lyrics</div>
+            <div class="setting-label" title="Embed synced (LRC) lyrics into the audio file (requires embed_lyrics).">
+              Embed Synced Lyrics <div class="help-icon">?</div>
+            </div>
             <div class="toggle" id="global-embed_synced_lyrics" data-path="global.lyrics.embed_synced_lyrics"
               onclick="this.classList.toggle('on')"></div>
           </div>
           <div class="setting-row">
-            <div class="setting-label" title="Save synced lyrics as a separate .lrc file next to the audio">Save Synced Lyrics</div>
+            <div class="setting-label" title="Save synced lyrics as a separate .lrc file alongside the track.">Save
+              Synced Lyrics <div class="help-icon">?</div>
+            </div>
             <div class="toggle" id="global-save_synced_lyrics" data-path="global.lyrics.save_synced_lyrics"
               onclick="this.classList.toggle('on')"></div>
           </div>
@@ -1345,12 +1755,16 @@
         <div class="glass-card">
           <div class="card-label blue">COVERS</div>
           <div class="setting-row">
-            <div class="setting-label" title="Embed the cover art into the audio file">Embed Cover</div>
+            <div class="setting-label" title="Embed the main cover art into the audio file.">Embed Cover <div
+                class="help-icon">?</div>
+            </div>
             <div class="toggle" id="global-embed_cover" data-path="global.covers.embed_cover"
               onclick="this.classList.toggle('on')"></div>
           </div>
           <div class="setting-row">
-            <div class="setting-label" title="Compression level of the embedded cover (high = smaller file)">Main Compression</div>
+            <div class="setting-label" title="Compression level for embedded/saved main cover art.">Main Compression
+              <div class="help-icon">?</div>
+            </div>
             <select id="global-main_compression" data-path="global.covers.main_compression" style="width:160px;">
               <option value="high">high</option>
               <option value="low">low</option>
@@ -1358,37 +1772,50 @@
             </select>
           </div>
           <div class="setting-row">
-            <div class="setting-label" title="Resolution (px) of the embedded cover art">Main Resolution</div>
+            <div class="setting-label" title="Maximum resolution (pixels) for the main cover art.">Main Resolution <div
+                class="help-icon">?</div>
+            </div>
             <input type="text" id="global-main_resolution" data-path="global.covers.main_resolution"
               style="width:80px;text-align:center;" />
           </div>
           <div class="setting-row">
-            <div class="setting-label" title="Save a separate external cover image file next to the audio">Save External</div>
+            <div class="setting-label" title="Save cover art from a third-party module (if configured).">Save External
+              <div class="help-icon">?</div>
+            </div>
             <div class="toggle" id="global-save_external" data-path="global.covers.save_external"
               onclick="this.classList.toggle('on')"></div>
           </div>
           <div class="setting-row">
-            <div class="setting-label" title="File format of the external cover image (jpg or png)">External Format</div>
+            <div class="setting-label" title="Format for the saved external cover art.">External Format <div
+                class="help-icon">?</div>
+            </div>
             <select id="global-external_format" data-path="global.covers.external_format" style="width:160px;">
               <option value="png">png</option>
               <option value="jpg">jpg</option>
             </select>
           </div>
           <div class="setting-row">
-            <div class="setting-label" title="Compression level of the external cover image">External Compression</div>
-            <select id="global-external_compression" data-path="global.covers.external_compression" style="width:160px;">
+            <div class="setting-label" title="Compression level for the saved external cover art.">External Compression
+              <div class="help-icon">?</div>
+            </div>
+            <select id="global-external_compression" data-path="global.covers.external_compression"
+              style="width:160px;">
               <option value="low">low</option>
               <option value="high">high</option>
               <option value="none">none</option>
             </select>
           </div>
           <div class="setting-row">
-            <div class="setting-label" title="Resolution (px) of the external cover image">External Resolution</div>
+            <div class="setting-label" title="Maximum resolution (pixels) for the saved external cover art.">External
+              Resolution <div class="help-icon">?</div>
+            </div>
             <input type="text" id="global-external_resolution" data-path="global.covers.external_resolution"
               style="width:80px;text-align:center;" />
           </div>
           <div class="setting-row">
-            <div class="setting-label" title="Download and save animated covers where available">Save Animated Cover</div>
+            <div class="setting-label" title="Save animated cover art (GIF/MP4) if available.">Save Animated Cover <div
+                class="help-icon">?</div>
+            </div>
             <div class="toggle" id="global-save_animated_cover" data-path="global.covers.save_animated_cover"
               onclick="this.classList.toggle('on')"></div>
           </div>
@@ -1397,19 +1824,25 @@
         <div class="glass-card">
           <div class="card-label blue">PLAYLIST</div>
           <div class="setting-row">
-            <div class="setting-label" title="Save a .m3u8 playlist file when downloading playlists">Save M3U</div>
+            <div class="setting-label" title="Create an M3U playlist file for playlist downloads.">Save M3U <div
+                class="help-icon">?</div>
+            </div>
             <div class="toggle" id="global-save_m3u" data-path="global.playlist.save_m3u"
               onclick="this.classList.toggle('on')"></div>
           </div>
           <div class="setting-row">
-            <div class="setting-label" title="Use absolute or relative paths inside the .m3u file">Paths M3U</div>
+            <div class="setting-label" title="Select 'relative' or 'absolute' paths in M3U file.">Paths M3U <div
+                class="help-icon">?</div>
+            </div>
             <select id="global-paths_m3u" data-path="global.playlist.paths_m3u" style="width:160px;">
               <option value="absolute">absolute</option>
               <option value="relative">relative</option>
             </select>
           </div>
           <div class="setting-row">
-            <div class="setting-label" title="Write extended M3U format with track metadata (title, duration)">Extended M3U</div>
+            <div class="setting-label" title="Include extended info like track length in M3U file.">Extended M3U <div
+                class="help-icon">?</div>
+            </div>
             <div class="toggle" id="global-extended_m3u" data-path="global.playlist.extended_m3u"
               onclick="this.classList.toggle('on')"></div>
           </div>
@@ -1418,12 +1851,17 @@
         <div class="glass-card">
           <div class="card-label blue">ARTIST DOWNLOADING</div>
           <div class="setting-row">
-            <div class="setting-label" title="Also download albums where the artist is a featured/credited artist, not the main artist">Return Credited Albums</div>
+            <div class="setting-label" title="Include albums where the artist is credited but not the main artist.">
+              Return Credited Albums <div class="help-icon">?</div>
+            </div>
             <div class="toggle" id="global-return_credited_albums"
               data-path="global.artist_downloading.return_credited_albums" onclick="this.classList.toggle('on')"></div>
           </div>
           <div class="setting-row">
-            <div class="setting-label" title="When downloading an artist, skip tracks that are already present in the download folder">Separate Tracks Skip Downloaded</div>
+            <div class="setting-label"
+              title="When downloading artists, skip tracks that are part of albums already downloaded.">Separate Tracks
+              Skip Downloaded <div class="help-icon">?</div>
+            </div>
             <div class="toggle" id="global-separate_tracks_skip_downloaded"
               data-path="global.artist_downloading.separate_tracks_skip_downloaded"
               onclick="this.classList.toggle('on')"></div>
@@ -1433,32 +1871,48 @@
         <div class="glass-card">
           <div class="card-label blue">FORMATTING</div>
           <div class="setting-row">
-            <div class="setting-label" title="Folder structure for albums, e.g. {artist}/{name}">Album Format</div>
+            <div class="setting-label"
+              title="Folder structure for albums. Variables:&#10; {artist}, {artist_id}, {artist_initials}, {album_artist}, {name}&#10; {id}, {label}, {catalog_number}, {release_year}&#10; {upc}, {explicit}, {quality}">
+              Album Format <div class="help-icon">?</div>
+            </div>
             <input type="text" id="global-album_format" data-path="global.formatting.album_format"
               style="width:200px;" />
           </div>
           <div class="setting-row">
-            <div class="setting-label" title="Folder name format for playlists">Playlist Format</div>
+            <div class="setting-label"
+              title="Folder structure for playlists. Variables:&#10; {creator}, {creator_id}&#10; {name}, {tracks}&#10; {release_year}, {explicit}">
+              Playlist Format <div class="help-icon">?</div>
+            </div>
             <input type="text" id="global-playlist_format" data-path="global.formatting.playlist_format"
               style="width:200px;" />
           </div>
           <div class="setting-row">
-            <div class="setting-label" title="File name format for individual tracks, e.g. {artist} - {name}">Track Filename Format</div>
+            <div class="setting-label"
+              title="Filename format for tracks. Variables:&#10; {artist}, {artist_id}, {artist_initials}, {album_artist}, {name}, {album}&#10; {track_number}, {total_tracks}, {disc_number}, {total_discs}&#10; {id}, {album_id}, {label}, {catalog_number}, {isrc}, {release_year}, {explicit}, {quality}">
+              Track Filename Format <div class="help-icon">?</div>
+            </div>
             <input type="text" id="global-track_filename_format" data-path="global.formatting.track_filename_format"
               style="width:200px;" />
           </div>
           <div class="setting-row">
-            <div class="setting-label" title="Full path format when downloading a single track (not in an album context)">Single Full Path Format</div>
+            <div class="setting-label"
+              title="Full path format (folder + filename) for single tracks not part of an album download.&#10;Uses same variables as Track Filename Format.">
+              Single Full Path Format <div class="help-icon">?</div>
+            </div>
             <input type="text" id="global-single_full_path_format" data-path="global.formatting.single_full_path_format"
               style="width:200px;" />
           </div>
           <div class="setting-row">
-            <div class="setting-label" title="Pad track numbers with leading zeros (e.g. 01, 02)">Enable Zfill</div>
+            <div class="setting-label" title="Pads track/disc numbers with leading zeros (e.g., 01, 02).">Enable Zfill
+              <div class="help-icon">?</div>
+            </div>
             <div class="toggle" id="global-enable_zfill" data-path="global.formatting.enable_zfill"
               onclick="this.classList.toggle('on')"></div>
           </div>
           <div class="setting-row">
-            <div class="setting-label" title="Always use the album format even for single tracks">Force Album Format</div>
+            <div class="setting-label" title="Use the album_format structure even for single track downloads.">Force
+              Album Format <div class="help-icon">?</div>
+            </div>
             <div class="toggle" id="global-force_album_format" data-path="global.formatting.force_album_format"
               onclick="this.classList.toggle('on')"></div>
           </div>
@@ -1467,47 +1921,71 @@
         <div class="glass-card">
           <div class="card-label blue">ADVANCED</div>
           <div class="setting-row">
-            <div class="setting-label" title="Enable advanced login/token management across modules">Advanced Login System</div>
+            <div class="setting-label"
+              title="Enable advanced login system (Use only if instructed by module documentation).">Advanced Login
+              System <div class="help-icon">?</div>
+            </div>
             <div class="toggle" id="global-advanced_login_system" data-path="global.advanced.advanced_login_system"
               onclick="this.classList.toggle('on')"></div>
           </div>
           <div class="setting-row">
-            <div class="setting-label" title="Skip files that are already downloaded">Ignore Existing Files</div>
+            <div class="setting-label"
+              title="Skips downloading files, if a file with the target name already exists in the output directory.">
+              Ignore Existing Files <div class="help-icon">?</div>
+            </div>
             <div class="toggle" id="global-ignore_existing_files" data-path="global.advanced.ignore_existing_files"
               onclick="this.classList.toggle('on')"></div>
           </div>
           <div class="setting-row">
-            <div class="setting-label" title="Skip tracks where the artist doesn't match the requested artist">Ignore Different Artists</div>
+            <div class="setting-label"
+              title="When downloading albums, ignore tracks where the artist differs from the main album artist.">Ignore
+              Different Artists <div class="help-icon">?</div>
+            </div>
             <div class="toggle" id="global-ignore_different_artists"
               data-path="global.advanced.ignore_different_artists" onclick="this.classList.toggle('on')"></div>
           </div>
           <div class="setting-row">
-            <div class="setting-label" title="Keep original file when a codec conversion is performed">Conversion Keep Original</div>
-            <div class="toggle" id="global-conversion_keep_original" data-path="global.advanced.conversion_keep_original"
-              onclick="this.classList.toggle('on')"></div>
+            <div class="setting-label" title="Keep the original file after successful codec conversion.">Conversion Keep
+              Original <div class="help-icon">?</div>
+            </div>
+            <div class="toggle" id="global-conversion_keep_original"
+              data-path="global.advanced.conversion_keep_original" onclick="this.classList.toggle('on')"></div>
           </div>
           <div class="setting-row">
-            <div class="setting-label" title="Allow conversions that reduce quality (e.g. FLAC → MP3)">Enable Undesirable Conversions</div>
-            <div class="toggle" id="global-enable_undesirable_conversions" data-path="global.advanced.enable_undesirable_conversions"
-              onclick="this.classList.toggle('on')"></div>
+            <div class="setting-label"
+              title="Controls allowance to perform codec conversions that might result in quality loss or are not recommended.&#10;Examples:&#10;Lossy-to-Lossy&#10;Lossless-to-Lossy (if not preferred)&#10;Unnecessary Lossless-to-Lossless">
+              Enable Undesirable Conversions <div class="help-icon">?</div>
+            </div>
+            <div class="toggle" id="global-enable_undesirable_conversions"
+              data-path="global.advanced.enable_undesirable_conversions" onclick="this.classList.toggle('on')"></div>
           </div>
           <div class="setting-row">
-            <div class="setting-label" title="Bypass subscription tier checks (use with caution)">Disable Subscription Checks</div>
-            <div class="toggle" id="global-disable_subscription_checks" data-path="global.advanced.disable_subscription_checks"
-              onclick="this.classList.toggle('on')"></div>
+            <div class="setting-label"
+              title="Prevents from checking if subscription for music service you are trying to download from is active.">
+              Disable Subscription Checks <div class="help-icon">?</div>
+            </div>
+            <div class="toggle" id="global-disable_subscription_checks"
+              data-path="global.advanced.disable_subscription_checks" onclick="this.classList.toggle('on')"></div>
           </div>
           <div class="setting-row">
-            <div class="setting-label" title="Path to the ffmpeg binary used for audio conversion">FFmpeg Path</div>
-            <input type="text" id="global-ffmpeg_path" data-path="global.advanced.ffmpeg_path"
-              style="width:180px;" />
+            <div class="setting-label"
+              title="Full path to the ffmpeg executable &#10;If set to just 'ffmpeg', it's assumed to be in the system PATH.&#10;This is used for codec conversions.">
+              FFmpeg Path <div class="help-icon">?</div>
+            </div>
+            <input type="text" id="global-ffmpeg_path" data-path="global.advanced.ffmpeg_path" style="width:180px;" />
           </div>
           <div class="setting-row">
-            <div class="setting-label" title="Threshold for detecting cover art differences between tracks (lower = stricter)">Cover Variance Threshold</div>
+            <div class="setting-label" title="Tolerance for accepting covers with slightly different sizes (0-100).">
+              Cover Variance Threshold <div class="help-icon">?</div>
+            </div>
             <input type="text" id="global-cover_variance_threshold" data-path="global.advanced.cover_variance_threshold"
               style="width:80px;text-align:center;" />
           </div>
           <div class="setting-row">
-            <div class="setting-label" title="Show verbose debug output in the terminal">Debug Mode</div>
+            <div class="setting-label"
+              title="Allows various detailed informational and diagnostic messages to be printed to the console.&#10;Intended for troubleshooting issues only.">
+              Debug Mode <div class="help-icon">?</div>
+            </div>
             <div class="toggle" id="global-debug_mode" data-path="global.advanced.debug_mode"
               onclick="this.classList.toggle('on')"></div>
           </div>
@@ -1618,6 +2096,117 @@
   </div><!-- end page-wrap -->
 
   <script>
+    // Global Help Tooltip Handler
+    let currentTooltipIcon = null;
+
+    function hideTooltip() {
+      const tooltip = document.getElementById('custom-tooltip');
+      if (tooltip) {
+        tooltip.classList.remove('visible');
+        setTimeout(() => { if (tooltip && !tooltip.classList.contains('visible')) tooltip.style.display = 'none'; }, 200);
+      }
+      if (currentTooltipIcon) {
+        currentTooltipIcon.classList.remove('active');
+        currentTooltipIcon = null;
+      }
+    }
+
+    function showTooltip(icon, text) {
+      const tooltip = document.getElementById('custom-tooltip');
+      if (!tooltip || !text) return;
+
+      if (currentTooltipIcon) hideTooltip();
+
+      currentTooltipIcon = icon;
+      icon.classList.add('active');
+
+      tooltip.textContent = text;
+      tooltip.style.display = 'block';
+
+      requestAnimationFrame(() => {
+        const rect = icon.getBoundingClientRect();
+        const tooltipRect = tooltip.getBoundingClientRect();
+
+        let left = rect.left + (rect.width / 2) - (tooltipRect.width / 2);
+        let top = rect.top - tooltipRect.height - 12;
+
+        if (left < 10) left = 10;
+        if (left + tooltipRect.width > window.innerWidth - 10) left = window.innerWidth - tooltipRect.width - 10;
+        if (top < 10) top = rect.bottom + 12;
+
+        tooltip.style.left = left + 'px';
+        tooltip.style.top = top + 'px';
+        tooltip.classList.add('visible');
+      });
+    }
+
+    document.addEventListener('click', (e) => {
+      const helpIcon = e.target.closest('.help-icon');
+      if (helpIcon) {
+        e.stopPropagation();
+        const label = helpIcon.closest('.setting-label');
+        const text = label?.title || helpIcon.title;
+        if (helpIcon === currentTooltipIcon) {
+          hideTooltip();
+        } else {
+          showTooltip(helpIcon, text);
+        }
+      } else {
+        hideTooltip();
+      }
+    });
+
+    window.addEventListener('scroll', hideTooltip, { passive: true });
+    window.addEventListener('resize', hideTooltip, { passive: true });
+
+    // Active Jobs Tracking
+    let activeJobId = null;
+
+    function resetStopButton() {
+      const btn = document.getElementById('dl-stop-btn');
+      if (btn) {
+        btn.innerHTML = 'Stop';
+        btn.disabled = false;
+        btn.style.opacity = '1';
+        btn.style.cursor = 'pointer';
+        btn.style.display = 'none';
+      }
+    }
+
+    async function stopJob(jobId) {
+      if (!jobId) return;
+      const btn = document.getElementById('dl-stop-btn');
+      if (btn) {
+        btn.innerHTML = 'Stopping...';
+        btn.disabled = true;
+        btn.style.opacity = '0.7';
+        btn.style.cursor = 'wait';
+        btn.classList.add('badge-red'); // Visual feedback
+      }
+      try {
+        const res = await fetch(`/api/job/stop/${jobId}`, { method: 'POST' });
+        const data = await res.json();
+        if (data.status === 'success') {
+          // Button will be hidden by pollJob once state confirms
+        } else {
+          alert('Error stopping download: ' + data.message);
+          if (btn) {
+            btn.innerHTML = 'Stop';
+            btn.disabled = false;
+            btn.style.opacity = '1';
+            btn.style.cursor = 'pointer';
+          }
+        }
+      } catch (e) {
+        console.error('Failed to contact server to stop job:', e);
+        if (btn) {
+          btn.innerHTML = 'Stop';
+          btn.disabled = false;
+          btn.style.opacity = '1';
+        }
+      }
+    }
+
     function switchPage(id, btn) {
       document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
       document.querySelectorAll('.nav-tab').forEach(b => b.classList.remove('active'));
@@ -1625,12 +2214,20 @@
       btn.classList.add('active');
 
       if (id === 'settings') {
-        initSettings().then(() => {
+        const finalizeSettingsTab = () => {
           const globalPill = document.querySelector('#settings-tabs .platform-pill');
-          if (globalPill && !window._activeSettingsTabId || window._activeSettingsTabId === 'tab-global') {
+          if (globalPill && (!window._activeSettingsTabId || window._activeSettingsTabId === 'tab-global')) {
             selectSettingsTab(globalPill, 'tab-global');
           }
-        });
+        };
+
+        if (!settingsCache) {
+          initSettings().then(finalizeSettingsTab);
+        } else {
+          // Re-load current state into UI before showing to ensure consistency
+          loadGlobalSettings(settingsCache);
+          finalizeSettingsTab();
+        }
       }
     }
 
@@ -1639,6 +2236,7 @@
       'tidal': { name: 'TIDAL', color: '#33ffe7' },
       'apple': { name: 'Apple Music', color: '#FA586A' },
       'applemusic': { name: 'Apple Music', color: '#FA586A' },
+      'apple music': { name: 'Apple Music', color: '#FA586A' },
       'beatport': { name: 'Beatport', color: '#00ff89' },
       'beatsource': { name: 'Beatsource', color: '#16a8f4' },
       'deezer': { name: 'Deezer', color: '#a238ff' },
@@ -1647,6 +2245,237 @@
       'spotify': { name: 'Spotify', color: '#1cc659' },
       'youtube': { name: 'YouTube', color: '#FF0000' }
     };
+
+    // --- PLATFORM SETUP GUIDES ---
+    // Content data moved from desktop GUI to parity functionality
+    const moduleGuides = {
+      'applemusic': {
+        title: "How to set up",
+        columns: [
+          {
+            demoUrl: "https://youtu.be/tbZaCFUnhow",
+            steps: [
+              { num: "1.", text: "Install extension" },
+              { text: "Chrome / Edge → <a class='guide-link' onclick=\"window.open('https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc?pli=1')\">Get cookies.txt</a> or Firefox → <a class='guide-link' onclick=\"window.open('https://addons.mozilla.org/en-US/firefox/addon/cookies-txt/')\">cookies.txt</a>", bullet: false },
+              { num: "2.", text: "Log in to <a class='guide-link' onclick=\"window.open('https://music.apple.com')\">Apple Music</a> <i>(active subscription required)</i>" },
+              { num: "3.", text: "Export & save as <b>cookies.txt</b><br><small>Path: ./config/cookies.txt</small>" }
+            ]
+          },
+          {
+            title: "How to set up wrapper",
+            subtitle: "(Optional: to download Dolby Atmos / ALAC)",
+            demoUrl: "https://youtu.be/VyEThfMFDYs",
+            steps: [
+              { text: "See demo / description below the video", plain: true }
+            ]
+          }
+        ]
+      },
+      'deezer': {
+        title: "How to set up",
+        columns: [
+          {
+            title: "Standard Setup",
+            steps: [
+              { num: "1.", text: "Fill in the email & password created, when signed up to <a class='guide-link' onclick=\"window.open('https://www.deezer.com')\">Deezer</a> <i>(active subscription required)</i> — Save." }
+            ]
+          },
+          {
+            title: "ARL Setup",
+            demoUrl: "https://youtu.be/TJTY4zSEgHU",
+            steps: [
+              { num: "1.", text: "Log in to <a class='guide-link' onclick=\"window.open('https://www.deezer.com')\">Deezer</a>" },
+              { num: "2.", text: "Open Developer Tools in your browser" },
+              { num: "3.", text: "Go to Application/Storage → Cookies → www.deezer.com" },
+              { num: "4.", text: "Seek for <span style='color:var(--accent-1)'>arl</span> → copy & paste above — Save." }
+            ]
+          },
+          {
+            title: "Recommended Values",
+            type: "recommended",
+            values: [
+              { label: "client_id", value: "613143" },
+              { label: "client_secret", value: "e635f790edfbc8f7574447214e3271e7" },
+              { label: "bf_secret", value: "g93bsW9bwfo79ml6" }
+            ]
+          }
+        ]
+      },
+      'qobuz': {
+        title: "How to set up",
+        columns: [
+          {
+            title: "Standard Setup",
+            steps: [
+              { num: "1.", text: "Fill in the email & password created, when signed up to <a class='guide-link' onclick=\"window.open('https://www.qobuz.com')\">Qobuz</a> <i>(active subscription required)</i> — Save." }
+            ]
+          },
+          {
+            title: "ID/Token Setup",
+            demoUrl: "https://youtu.be/sCuiyq-Sgo4",
+            steps: [
+              { num: "1.", text: "Log in to <a class='guide-link' onclick=\"window.open('https://play.qobuz.com')\">https://play.qobuz.com</a>" },
+              { num: "2.", text: "Open Developer Tools in your browser" },
+              { num: "3.", text: "Go to Application/Storage → Local storage → play.qobuz.com" },
+              { num: "4.", text: "Seek for <span style='color:var(--accent-1)'>local user</span>" },
+              { num: "5.", text: "Copy <span style='color:var(--accent-1)'>ID</span> + <span style='color:var(--accent-1)'>Token</span> & paste above — Save." }
+            ]
+          },
+          {
+            title: "Recommended Values",
+            type: "recommended",
+            values: [
+              { label: "app_id", value: "798273057" },
+              { label: "app_secret", value: "abb21364945c0583309667d13ca3d93a" }
+            ]
+          }
+        ]
+      },
+      'soundcloud': {
+        title: "How to set up",
+        columns: [
+          {
+            demoUrl: "https://www.youtube.com/watch?v=LEEJosz2CYg",
+            steps: [
+              { num: "1.", text: "Log in to <a class='guide-link' onclick=\"window.open('https://soundcloud.com')\">SoundCloud</a> <i>(active Go+ subscription required)</i>" },
+              { num: "2.", text: "Open Developer Tools in your browser" },
+              { num: "3.", text: "Go to Application/Storage → Cookies → soundcloud.com" },
+              { num: "4.", text: "Seek for <span style='color:var(--accent-1)'>oauth_token</span> (e.g. 2-000000-000000...)" },
+              { num: "5.", text: "Copy & paste above — Save." }
+            ]
+          }
+        ]
+      },
+      'tidal': {
+        title: "How to set up",
+        columns: [
+          {
+            steps: [
+              { num: "1.", text: "Just enter url to download or use search function" },
+              { num: "2.", text: "In the browser window that opens, fill in the email & password created, when signed up to <a class='guide-link' onclick=\"window.open('https://tidal.com')\">TIDAL</a>" },
+              { num: "3.", text: "Hit continue to link your device & close the browser" }
+            ]
+          },
+          {
+            title: "Recommended Values",
+            type: "recommended",
+            values: [
+              { label: "tv_atmos_token", value: "4N3n6Q1x95LL5K7p" },
+              { label: "tv_atmos_secret", value: "oKOXfJW371cX6xaZ0PyhgGNBdNLlBZd4AKKYougMjik=" },
+              { label: "mobile_atmos_hires_token", value: "km8T1xS355y7dd3H" },
+              { label: "mobile_hires_token", value: "6BDSRdpK9hqEBTgU" }
+            ]
+          }
+        ]
+      },
+      'spotify': {
+        title: "How to set up",
+        columns: [
+          {
+            demoUrl: "https://www.youtube.com/watch?v=aJYDACfilRM",
+            steps: [
+              { num: "1.", text: "Log in to <a class='guide-link' onclick=\"window.open('https://developer.spotify.com/dashboard')\">Spotify Dashboard</a> <i>(active Premium required)</i>" },
+              { num: "2.", text: "Take over username & fill in above" },
+              { num: "3.", text: "In the dashboard, create an app (or use existing one)" },
+              { num: "4.", text: "Add Redirect URI <b>http://127.0.0.1:4381/login</b>" },
+              { num: "5.", text: "Save → Copy <b>Client ID</b> + <b>Secret</b>, paste them above — Save." }
+            ]
+          }
+        ]
+      },
+      'youtube': {
+        title: "How to set up",
+        subtitle: "(Recommended: to prevent 403 errors / for age-restricted content)",
+        columns: [
+          {
+            demoUrl: "https://youtu.be/XAnP6s11TvY",
+            steps: [
+              { num: "1.", text: "Install extension (Get cookies.txt locally)" },
+              { num: "2.", text: "Manage extension → Enable 'Allow in incognito / private window'" },
+              { num: "3.", text: "Open a new private / incognito window" },
+              { num: "4.", text: "Log in to <a class='guide-link' onclick=\"window.open('https://youtube.com')\">YouTube</a>" },
+              { num: "5.", text: "In same tab open: <b>youtube.com/robots.txt</b>" },
+              { num: "6.", text: "Export & save as <b>youtube-cookies.txt</b><br><small>Path: ./config/youtube-cookies.txt</small>" }
+            ]
+          }
+        ]
+      },
+      'beatport': {
+        title: "How to set up",
+        columns: [
+          {
+            steps: [
+              { num: "1.", text: "Fill in the username & password created, when signed up to <a class='guide-link' onclick=\"window.open('https://www.beatport.com')\">Beatport</a>" },
+              { text: "<i>(active Beatport Professional subscription required)</i> — Save." }
+            ]
+          }
+        ]
+      },
+      'beatsource': {
+        title: "How to set up",
+        columns: [
+          {
+            steps: [
+              { num: "1.", text: "Fill in the username & password created, when signed up to <a class='guide-link' onclick=\"window.open('https://www.beatsource.com')\">Beatsource</a>" },
+              { text: "<i>(active Beatsource Pro subscription required)</i> — Save." }
+            ]
+          }
+        ]
+      }
+    };
+
+    // ── IMAGE FALLBACK CACHE ──
+    const imageFallbackCache = {};
+    function handleImageError(img) {
+      const originalSrc = img.dataset.originalSrc;
+      const fallback = 'https://geo-media.beatport.com/image_size/500x500/ab2d1d04-233d-4b08-8234-9782b34dcab8.jpg';
+      if (originalSrc) imageFallbackCache[originalSrc] = fallback;
+      img.src = fallback;
+      img.onerror = null;
+    }
+
+    function updateSearchBtnState(isSearching) {
+      const btn = document.getElementById('search-btn');
+      if (!btn) return;
+      if (isSearching) {
+        btn.title = 'Stop Search';
+        btn.innerHTML = `
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="6" y="6" width="12" height="12"></rect>
+          </svg>`;
+      } else {
+        btn.title = 'Search';
+        btn.innerHTML = `
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>`;
+      }
+    }
+
+    function copyToClipboard(text, btn) {
+      if (!navigator.clipboard) {
+        // Fallback for older browsers or non-HTTPS
+        const el = document.createElement('textarea');
+        el.value = text;
+        document.body.appendChild(el);
+        el.select();
+        document.execCommand('copy');
+        document.body.removeChild(el);
+      } else {
+        navigator.clipboard.writeText(text);
+      }
+
+      const original = btn.innerHTML;
+      btn.innerHTML = '✓';
+      btn.style.borderColor = 'var(--accent-1)';
+      btn.style.color = 'var(--accent-1)';
+      setTimeout(() => {
+        btn.innerHTML = original;
+        btn.style.borderColor = '';
+        btn.style.color = '';
+      }, 1500);
+    }
 
     function getPlatformBranding(raw) {
       if (!raw) return { name: 'Download', color: 'inherit' };
@@ -1798,9 +2627,9 @@
       } else if (policy === 'youtube') {
         visible.add(2); visible.add(3); visible.add(4);
         defaultSelected = 2;
-        if (chips[2]) { chips[2].textContent = 'OPUS (lossless)'; chips[2].dataset.quality = 'lossless'; }
-        if (chips[3]) { chips[3].textContent = 'AAC (high)'; chips[3].dataset.quality = 'high'; }
-        if (chips[4]) { chips[4].textContent = 'MP3 (low)'; chips[4].dataset.quality = 'low'; }
+        if (chips[2]) { chips[2].textContent = 'OPUS'; chips[2].dataset.quality = 'lossless'; }
+        if (chips[3]) { chips[3].textContent = 'AAC'; chips[3].dataset.quality = 'high'; }
+        if (chips[4]) { chips[4].textContent = 'MP3'; chips[4].dataset.quality = 'low'; }
       } else {
         visible.add(0); visible.add(1); visible.add(2); visible.add(3); visible.add(4);
       }
@@ -1830,6 +2659,7 @@
 
     // ── DOWNLOAD BY URL ──
     async function startDownload() {
+      resetStopButton();
       const url = document.getElementById('url-input').value.trim();
       if (!url) { alert('Please enter a URL'); return; }
 
@@ -1863,6 +2693,8 @@
         });
         const { job_id, error } = await res.json();
         if (error) { status.textContent = 'Error'; status.className = 'badge badge-red'; lbl.textContent = error; return; }
+        activeJobId = job_id;
+        document.getElementById('dl-stop-btn').style.display = 'inline-block';
         pollJob(job_id, bar, lbl, status);
       } catch (e) {
         status.textContent = 'Error'; status.className = 'badge badge-red';
@@ -1870,25 +2702,110 @@
       }
     }
 
-    // ── LINKIFY ──
-    function linkify(text) {
-      // 1. Repair split URLs (specific to OrpheusDL output)
-      // Automatically join lines beginning with 'URL: ' that are split by newlines
-      // until a common phrase like 'If the browser' or another newline/end appears.
-      text = text.replace(/URL:\s+([\s\S]+?)(?=\s+If the browser|$)/g, (match, p1) => {
-          // Remove all newlines and spaces from the URL segment to rejoin it
-          return 'URL: ' + p1.replace(/\s+/g, '');
+    // ── LOG FORMATTING ──
+    let lastFormattedLog = '';
+    let lastLogLength = 0;
+
+    function formatLog(logArray) {
+      if (!logArray || !logArray.length) return '';
+      // Optimization: Only re-format if the log has actually grown
+      if (logArray.length === lastLogLength) return lastFormattedLog;
+
+      // 1. Join and handle split URLs (specific to OrpheusDL output)
+      // FIX: Use a more specific regex to avoid catastrophic backtracking
+      let text = logArray.join('\n');
+      text = text.replace(/URL:\s+([^\s]+?)(?=\s+If the browser|$)/g, (match, p1) => {
+        return 'URL: ' + p1.replace(/\s+/g, '');
       });
 
-      // 2. Escape non-URL parts safely to prevent XSS
-      const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      
-      // 3. Robust URL detection regex
-      const urlRegex = /(https?:\/\/[^\s]+)/g;
-      
-      // We need to handle the case where the regex might match an already-escaped &amp;
-      // In Javascript, replace() with $1 works fine even if it contains &amp;
-      return escaped.replace(urlRegex, '<a href="$1" target="_blank">$1</a>');
+      // 2. Escape HTML & Split
+      const lines = text.split('\n');
+      const formattedLines = lines.map(line => {
+        const escaped = line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        const trimmed = escaped.trim();
+        if (!trimmed) return escaped;
+
+        // --- Heading Lines (Dashes) ---
+        if (trimmed.startsWith('---') && trimmed.endsWith('---')) {
+          const content = trimmed.slice(3, -3).trim();
+          if (content.toLowerCase().includes('stopped')) {
+            return `<span class="log-gray">---</span> <span class="log-error">${content}</span> <span class="log-gray">---</span>`;
+          }
+          return `<span class="log-gray">---</span> <span class="log-white">${content}</span> <span class="log-gray">---</span>`;
+        }
+
+        // --- Heading Lines (Equals) ---
+        if (trimmed.startsWith('===') && trimmed.endsWith('===')) {
+          const content = trimmed.slice(3, -3).trim();
+          if (content.match(/[+✓▶⚠✗]/) || content.toLowerCase().match(/(completed|successfully|success|failed|error|skipped|exists)/)) {
+            const isError = content.toLowerCase().match(/(failed|error)/) || content.includes('✗');
+            const isWarning = content.toLowerCase().includes('skipped') || content.includes('▶') || content.includes('⚠') || content.includes('&gt;');
+            let colorClass = isError ? 'log-error' : (isWarning ? 'log-warning' : 'log-success');
+            return `<span class="log-gray">===</span> <span class="${colorClass}">${content}</span> <span class="log-gray">===</span>`;
+          }
+
+          const downloadRegex = /^(Downloading (?:track|album|playlist|label)) (.+?)( \(.+\))?$/i;
+          const dlMatch = content.match(downloadRegex);
+          if (dlMatch) {
+            let res = `<span class="log-gray">===</span> <span class="log-secondary">${dlMatch[1]}</span> <span class="log-white">${dlMatch[2]}</span>`;
+            if (dlMatch[3]) res += `<span class="log-secondary">${dlMatch[3]}</span>`;
+            res += ` <span class="log-gray">===</span>`;
+            return res;
+          }
+          return `<span class="log-gray">===</span> <span class="log-white">${content}</span> <span class="log-gray">===</span>`;
+        }
+
+        // --- Metadata Lines ---
+        const metaRegex = /^(Artist|Artists|Label|Album|Playlist creator|Year|Release year|Playlist creation year|Duration|Number of tracks|Quality):\s+(.+)$/i;
+        const metaMatch = trimmed.match(metaRegex);
+        if (metaMatch) {
+          const value = metaMatch[2];
+          const parts = value.match(/^(.+?)(\s*\(.+\))?$/);
+          return `<span class="log-label">${metaMatch[1]}:</span> <span class="log-value">${parts ? parts[1] : value}</span>${(parts && parts[2]) ? `<span class="log-gray">${parts[2]}</span>` : ''}`;
+        }
+
+        // --- Platform Line ---
+        if (trimmed.toLowerCase().startsWith('platform:')) {
+          const pName = trimmed.split(':')[1].trim();
+          const branding = getPlatformBranding(pName);
+          return `<span class="log-label">Platform:</span> <span class="log-value" style="color: ${branding.color}">${pName}</span>`;
+        }
+
+        // --- Track Lines ---
+        const trackRegex = /^(\d+\/\d+)\s+([+x✓✗▶⚠]|&gt;)\s+(.+)$/;
+        const trackMatch = trimmed.match(trackRegex);
+        if (trackMatch) {
+          const index = trackMatch[1], symbol = trackMatch[2];
+          let fullTitle = trackMatch[3], title = fullTitle, extra = '', extraClass = 'log-secondary';
+          const statusMatch = fullTitle.match(/\s+(\([^)]*?(?:already exists|skip|failed|error)[^)]*?\))$/i);
+          if (statusMatch) {
+            title = fullTitle.slice(0, -statusMatch[1].length).trim();
+            extra = statusMatch[1];
+            if (extra.toLowerCase().includes('exists') || extra.toLowerCase().includes('skip')) extraClass = 'log-warning';
+            else if (extra.toLowerCase().includes('failed') || extra.toLowerCase().includes('error')) extraClass = 'log-error';
+          }
+          let symbolClass = 'log-secondary';
+          if (symbol === '+' || symbol === '✓') symbolClass = 'log-success';
+          else if (symbol === '&gt;' || symbol === '▶' || symbol === '⚠') symbolClass = 'log-warning';
+          else if (symbol === 'x' || symbol === '✗') symbolClass = 'log-error';
+
+          return `<span class="log-gray">${index}</span> <span class="${symbolClass}">${symbol}</span> <span class="log-white">${title}</span>${extra ? ` <span class="${extraClass}">${extra}</span>` : ''}`;
+        }
+
+        if (trimmed.includes('✓') || trimmed.toUpperCase().startsWith('DONE') || trimmed.toLowerCase().includes('successfully')) {
+          return `<span class="log-success">${escaped}</span>`;
+        }
+        if (trimmed.toUpperCase().includes('ERROR') || trimmed.toUpperCase().includes('FAILED')) {
+          return `<span class="log-error">${escaped}</span>`;
+        }
+
+        const urlRegex = /(https?:\/\/[^\s]+?)(?=[,.]?(\s|$))/g;
+        return escaped.replace(urlRegex, '<a href="$1" target="_blank">$1</a>');
+      });
+
+      lastLogLength = logArray.length;
+      lastFormattedLog = formattedLines.join('\n');
+      return lastFormattedLog;
     }
 
     // ── POLL JOB ──
@@ -1898,37 +2815,58 @@
       if (logContainer) logContainer.style.display = 'block';
       if (logEl) logEl.textContent = '';
 
-      const iv = setInterval(async () => {
+      async function run() {
+        if (job_id !== activeJobId) return;
         try {
           const res = await fetch('/api/job/' + job_id);
+          if (!res.ok) throw new Error('Network error');
           const job = await res.json();
+
           bar.style.width = job.progress + '%';
           lbl.textContent = job.progress + '%';
 
           if (logEl && job.log) {
-            logEl.innerHTML = linkify(job.log.join('\n'));
+            logEl.innerHTML = formatLog(job.log);
             logEl.scrollTop = logEl.scrollHeight;
           }
 
-          const lastLine = job.log.slice(-1)[0] || '';
-          if (job.status === 'done') {
-            clearInterval(iv);
-            bar.style.width = '100%'; lbl.textContent = '100%';
-            status.textContent = 'Done ✓'; status.className = 'badge badge-green';
-          } else if (job.status === 'error') {
-            clearInterval(iv);
-            status.textContent = 'Error'; status.className = 'badge badge-red';
-            lbl.textContent = lastLine;
+          const lastLine = job.log && job.log.length ? job.log[job.log.length - 1] : '';
+          if (job.status === 'done' || job.status === 'error' || job.status === 'stopped') {
+            document.getElementById('dl-stop-btn').style.display = 'none';
+            if (job.status === 'done') {
+              bar.style.width = '100%'; lbl.textContent = '100%';
+              status.textContent = 'Done ✓'; status.className = 'badge badge-green';
+            } else if (job.status === 'error') {
+              status.textContent = 'Error'; status.className = 'badge badge-red';
+              lbl.textContent = lastLine;
+            } else if (job.status === 'stopped') {
+              status.textContent = 'Stopped'; status.className = 'badge badge-red';
+              lbl.textContent = 'Stopped by user';
+            }
           } else {
             status.textContent = 'Downloading'; status.className = 'badge badge-white';
+            document.getElementById('dl-stop-btn').style.display = 'inline-block';
+            setTimeout(run, 800);
           }
-        } catch (e) { clearInterval(iv); }
-      }, 800);
+        } catch (e) {
+          console.error('Polling error:', e);
+          if (job_id === activeJobId) setTimeout(run, 2000); // Retry after delay
+        }
+      }
+      run();
     }
 
     // ── SEARCH ──
     let currentSearchJobId = null;
+    let lastSearchJobId = null;
     async function doSearch() {
+      if (currentSearchJobId) {
+        stopJob(currentSearchJobId);
+        currentSearchJobId = null;
+        updateSearchBtnState(false);
+        return;
+      }
+
       const q = document.getElementById('search-input').value.trim();
       if (!q) return;
       const platformPill = document.querySelector('#search-platforms .platform-pill.selected');
@@ -1947,6 +2885,8 @@
         const { job_id, error } = await res.json();
         if (error) { list.innerHTML = '<div style="padding:12px;color:#f87171;font-size:12px;">' + error + '</div>'; return; }
         currentSearchJobId = job_id;
+        lastSearchJobId = job_id;
+        updateSearchBtnState(true);
         pollSearchJob(job_id, list);
       } catch (e) {
         list.innerHTML = '<div style="padding:12px;color:#f87171;font-size:12px;">Backend not reachable. Is webui.py running?</div>';
@@ -1955,24 +2895,41 @@
 
     function pollSearchJob(job_id, list) {
       const iv = setInterval(async () => {
+        // --- PREVENTION: Abandon this interval if a new search has started ---
+        if (job_id !== currentSearchJobId) {
+          clearInterval(iv);
+          return;
+        }
+
         try {
           const res = await fetch('/api/job/' + job_id);
           const job = await res.json();
           // Remember which results were selected before re-rendering
           const selectedIndices = Array.from(list.querySelectorAll('.result-item.selected'))
             .map(el => el.dataset.index);
-            
+
           renderSearchResults(job.log, list, job.status);
-          
+
           // Restore multiple selections after re-render
           selectedIndices.forEach(idx => {
             const restored = list.querySelector(`.result-item[data-index="${idx}"]`);
             if (restored) restored.classList.add('selected');
           });
-          if (job.status === 'done' || job.status === 'error') {
+
+          if (job.status === 'done' || job.status === 'error' || job.status === 'stopped') {
             clearInterval(iv);
+            if (job_id === currentSearchJobId) {
+              currentSearchJobId = null;
+              updateSearchBtnState(false);
+            }
           }
-        } catch (e) { clearInterval(iv); }
+        } catch (e) {
+          clearInterval(iv);
+          if (job_id === currentSearchJobId) {
+            currentSearchJobId = null;
+            updateSearchBtnState(false);
+          }
+        }
       }, 800);
     }
 
@@ -2080,11 +3037,13 @@
         const platformIcon = r.platform ? platformMap[r.platform.toLowerCase()] : null;
         const branding = getPlatformBranding(r.platform || 'Search');
 
+        const displayUrl = imageFallbackCache[r.imageUrl] || r.imageUrl;
+
         return `
       <div class="result-item" onclick="selectResult(this)" data-index="${r.num}" data-platform="${r.platform || ''}">
         <div class="result-num">${r.num}</div>
         <div class="result-cover-container">
-          ${r.imageUrl ? `<img src="${r.imageUrl}" class="result-cover" loading="lazy">` : `<div class="result-cover-placeholder">?</div>`}
+          ${r.imageUrl ? `<img src="${displayUrl}" class="result-cover" loading="lazy" data-original-src="${r.imageUrl}" onerror="handleImageError(this)">` : `<div class="result-cover-placeholder">?</div>`}
           ${platformIcon ? `<div class="platform-icon-overlay"><img src="/platforms/${platformIcon}"></div>` : ''}
         </div>
         <div class="result-info">
@@ -2094,20 +3053,81 @@
           </div>
           <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">
             ${r.chips.flatMap(c => {
-              const hasAtmos = c.includes('ATMOS');
-              const hasHiRes = c.includes('HI-RES');
-              if (hasAtmos || hasHiRes) {
-                const subchips = [];
-                if (hasAtmos) subchips.push(`<span class="result-chip"><img src="/platforms/dolby.svg" style="height:10px; margin-right:4px; vertical-align:middle;">ATMOS</span>`);
-                if (hasHiRes) subchips.push(`<span class="result-chip"><img src="/platforms/hires.svg" style="height:12px; margin-right:4px; vertical-align:middle;">HI-RES</span>`);
-                return subchips;
-              }
-              return `<span class="result-chip">${c}</span>`;
-            }).join('')}
+          const hasAtmos = c.includes('ATMOS');
+          const hasHiRes = c.includes('HI-RES');
+          if (hasAtmos || hasHiRes) {
+            const subchips = [];
+            if (hasAtmos) subchips.push(`<span class="result-chip"><img src="/platforms/dolby.svg" style="height:10px; margin-right:4px; vertical-align:middle;">ATMOS</span>`);
+            if (hasHiRes) subchips.push(`<span class="result-chip"><img src="/platforms/hires.svg" style="height:12px; margin-right:4px; vertical-align:middle;">HI-RES</span>`);
+            return subchips;
+          }
+          return `<span class="result-chip">${c}</span>`;
+        }).join('')}
           </div>
         </div>
       </div>
     `}).join('');
+    }
+
+
+    function getEffectiveQualityInfo(platformName, requestedQuality) {
+      const hierarchy = ['atmos', 'hifi', 'lossless', 'high', 'low'];
+      const requestedIdx = hierarchy.indexOf(requestedQuality.toLowerCase());
+      if (requestedIdx === -1) return { quality: requestedQuality, label: requestedQuality.toUpperCase() };
+
+      const normalizedPlatform = platformName.toLowerCase().replace(/\s+/g, '');
+      const mapPlatformToPolicy = {
+        'beatport': 'beat',
+        'beatsource': 'beat',
+        'deezer': 'deezer',
+        'qobuz': 'qobuz',
+        'soundcloud': 'soundcloud',
+        'applemusic': 'applemusic',
+        'spotify': 'spotify',
+        'tidal': 'tidal',
+        'youtube': 'youtube'
+      };
+      const policy = mapPlatformToPolicy[normalizedPlatform] || 'default';
+
+      // Get visible chips for this policy (matching applyCodecPolicy logic)
+      let visible = [0, 1, 2, 3, 4];
+      if (policy === 'beat' || policy === 'deezer') visible = [2, 3, 4];
+      else if (policy === 'qobuz') visible = [1, 2, 3];
+      else if (policy === 'soundcloud' || policy === 'applemusic') visible = [3];
+      else if (policy === 'spotify') visible = [3, 4];
+      else if (policy === 'youtube') visible = [2, 3, 4];
+
+      // Find highest visible chip with index >= requestedIdx
+      let bestIdx = -1;
+      for (let i = 0; i < hierarchy.length; i++) {
+        if (i >= requestedIdx && visible.includes(i)) {
+          bestIdx = i;
+          break;
+        }
+      }
+
+      // Fallback to closest supported if requested is out of range
+      if (bestIdx === -1 && visible.length > 0) {
+        // If requested index is higher than any visible (user wants LOW, but only HIGH+ available), 
+        // use the highest visible index (lowest quality).
+        bestIdx = visible[visible.length - 1];
+      }
+      if (bestIdx === -1) return { quality: requestedQuality, label: requestedQuality.toUpperCase() };
+
+      // Get label and quality string for this chip index under this policy
+      let label = hierarchy[bestIdx].toUpperCase();
+      let quality = hierarchy[bestIdx];
+
+      if (policy === 'spotify') {
+        if (bestIdx === 3) { label = 'HIGH'; quality = 'lossless'; }
+        if (bestIdx === 4) { label = 'LOW'; quality = 'low'; }
+      } else if (policy === 'youtube') {
+        if (bestIdx === 2) { label = 'OPUS'; quality = 'lossless'; }
+        if (bestIdx === 3) { label = 'AAC'; quality = 'high'; }
+        if (bestIdx === 4) { label = 'MP3'; quality = 'low'; }
+      }
+
+      return { quality, label };
     }
 
 
@@ -2122,7 +3142,7 @@
 
       const activePage = document.querySelector('.page.active');
       const selectedChip = activePage ? activePage.querySelector('.codec-chip.selected') : document.querySelector('.codec-chip.selected');
-      const quality = selectedChip?.dataset?.quality ? selectedChip.dataset.quality : (selectedChip?.textContent.trim() || '');
+      const requestedQuality = selectedChip?.dataset?.quality ? selectedChip.dataset.quality : (selectedChip?.textContent.trim() || '');
 
       // Switch to download tab to show progress
       switchPage('url', document.querySelector('.nav-tab'));
@@ -2139,66 +3159,80 @@
       if (logContainer) logContainer.style.display = 'block';
 
       for (let i = 0; i < selectedItems.length; i++) {
+        resetStopButton();
         const selected = selectedItems[i];
         const index = selected.dataset.index;
         const platform = selected.dataset.platform || 'Search';
         const branding = getPlatformBranding(platform);
+
+        // Adjust quality based on platform capabilities
+        const { label: effLabel, quality: effQuality } = getEffectiveQualityInfo(platform, requestedQuality);
 
         bar.style.width = '0%'; lbl.textContent = '0%';
         status.textContent = 'Starting…'; status.className = 'badge badge-white';
         if (logEl) logEl.textContent = '';
 
         if (tTitle) {
-          tTitle.textContent = selectedItems.length > 1
-            ? `${branding.name} (${i + 1}/${selectedItems.length})`
-            : branding.name;
+          tTitle.textContent = branding.name;
           tTitle.style.color = branding.color;
         }
-        if (tMeta) tMeta.textContent = quality ? `${quality} · from search` : 'Search result';
+        if (tMeta) tMeta.textContent = effLabel ? `${effLabel} · from search` : 'Search result';
 
         try {
           const res = await fetch('/api/search/download', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ search_job_id: currentSearchJobId, index: parseInt(index), quality })
+            body: JSON.stringify({ search_job_id: lastSearchJobId, index: parseInt(index), quality: effQuality })
           });
           const { job_id, error } = await res.json();
           if (error) { alert('Error: ' + error); continue; }
-
-          window._activeDownloadJob = job_id;
+          activeJobId = job_id;
+          document.getElementById('dl-stop-btn').style.display = 'inline-block';
 
           // Wait for this job to finish before starting the next
           await new Promise(resolve => {
-            const iv = setInterval(async () => {
+            async function runIter() {
+              if (job_id !== activeJobId) { resolve(); return; }
               try {
                 const r = await fetch('/api/job/' + job_id);
+                if (!r.ok) throw new Error('Network error');
                 const job = await r.json();
                 bar.style.width = job.progress + '%';
                 lbl.textContent = job.progress + '%';
 
                 if (logEl && job.log) {
-                  logEl.innerHTML = linkify(job.log.join('\n'));
+                  logEl.innerHTML = formatLog(job.log);
                   logEl.scrollTop = logEl.scrollHeight;
                 }
 
-                if (job.status === 'done') {
-                  clearInterval(iv);
-                  bar.style.width = '100%'; lbl.textContent = '100%';
-                  status.textContent = selectedItems.length > 1 && i < selectedItems.length - 1
-                    ? `Done (${i + 1}/${selectedItems.length})` : 'Done ✓';
-                  status.className = 'badge badge-green';
-                  resolve();
-                } else if (job.status === 'error') {
-                  clearInterval(iv);
-                  status.textContent = 'Error'; status.className = 'badge badge-red';
+                if (job.status === 'done' || job.status === 'error' || job.status === 'stopped') {
+                  document.getElementById('dl-stop-btn').style.display = 'none';
+                  if (job.status === 'done') {
+                    bar.style.width = '100%'; lbl.textContent = '100%';
+                    status.textContent = selectedItems.length > 1 && i < selectedItems.length - 1
+                      ? `Done (${i + 1}/${selectedItems.length})` : 'Done ✓';
+                    status.className = 'badge badge-green';
+                  } else if (job.status === 'error') {
+                    status.textContent = 'Error'; status.className = 'badge badge-red';
+                  } else if (job.status === 'stopped') {
+                    status.textContent = 'Stopped'; status.className = 'badge badge-red';
+                    lbl.textContent = 'Stopped by user';
+                    i = selectedItems.length; // Abort batch
+                  }
                   resolve();
                 } else {
                   status.textContent = selectedItems.length > 1
                     ? `Downloading (${i + 1}/${selectedItems.length})` : 'Downloading';
                   status.className = 'badge badge-white';
+                  document.getElementById('dl-stop-btn').style.display = 'inline-block';
+                  setTimeout(runIter, 800);
                 }
-              } catch (e) { clearInterval(iv); resolve(); }
-            }, 800);
+              } catch (e) {
+                console.error('Batch polling error:', e);
+                setTimeout(runIter, 2000); // Retry on error
+              }
+            }
+            runIter();
           });
         } catch (e) {
           console.error(e);
@@ -2275,12 +3309,14 @@
 
     async function fetchSettings() {
       try {
-        const res = await fetch('/api/settings');
+        const res = await fetch('/api/settings?t=' + Date.now());
         if (!res.ok) {
           const err = await res.json();
           throw new Error(err.error || 'Failed to fetch settings');
         }
-        return await res.json();
+        const data = await res.json();
+        console.log('[Settings] Loaded:', data.global?.general?.disabled_search_platforms);
+        return data;
       } catch (e) {
         throw new Error('Failed to fetch settings. Is webui.py running? ' + e.message);
       }
@@ -2353,6 +3389,29 @@
           if (el.type === 'range') { el.nextElementSibling.textContent = el.value; }
         }
       });
+      renderSearchPlatformSettings(data);
+    }
+
+    function renderSearchPlatformSettings(data) {
+      const grid = document.getElementById('search-platforms-grid');
+      if (!grid || !data.modules) return;
+
+      const disabled = data.global.general.disabled_search_platforms || [];
+      const modules = Object.keys(data.modules).sort();
+
+      grid.innerHTML = modules.map(m => {
+        if (customModuleConfigs[m]?.hide) return '';
+        // In the opt-out model, if it's NOT in the disabled list, it's considered "Selected/Active"
+        const isIncluded = !disabled.includes(m);
+        return `
+          <div class="platform-pill ${isIncluded ? 'selected' : ''}" 
+               data-id="${m}" 
+               data-platform="${m}" 
+               onclick="this.classList.toggle('selected')">
+            ${humanizeSettingsKey(m)}
+          </div>
+        `;
+      }).join('');
     }
 
     function renderModuleSettings(moduleKey) {
@@ -2385,7 +3444,12 @@
 
         const row = document.createElement('div');
         row.className = 'setting-row';
-        row.innerHTML = `<div class="setting-label">${humanizeSettingsKey(key)}</div>`;
+
+        const labelWrapper = document.createElement('div');
+        labelWrapper.className = 'setting-label';
+        labelWrapper.textContent = humanizeSettingsKey(key);
+
+        row.appendChild(labelWrapper);
         const right = document.createElement('div');
         right.style = 'display:flex; align-items:center; gap:8px; flex:1; justify-content:flex-end;';
 
@@ -2439,30 +3503,155 @@
           const inp = document.createElement('input');
           const sensitiveKeys = ['password', 'secret', 'arl', 'token'];
           const isSensitive = sensitiveKeys.some(s => key.toLowerCase().includes(s));
-          
+
           inp.type = isSensitive ? 'password' : 'text';
           inp.value = value === null ? '' : String(value);
           inp.dataset.key = key;
           inp.dataset.type = 'string';
           inp.style.flex = '1';
           inp.style.minWidth = '0';
-          
+
           if (isSensitive) {
             inp.addEventListener('focus', () => { inp.type = 'text'; });
             inp.addEventListener('blur', () => { inp.type = 'password'; });
             inp.title = 'Click to reveal';
           }
-          
+
           right.appendChild(inp);
         }
         row.appendChild(right);
         container.appendChild(row);
       });
+
+      // --- SETUP GUIDES RENDERING (Collapsible Card at Bottom) ---
+      const guideData = moduleGuides[moduleKey.toLowerCase()];
+      const tabContainer = document.getElementById('tab-' + moduleKey);
+
+      if (guideData && tabContainer) {
+        // Remove existing guide card if any (to prevent duplicates on re-render)
+        const oldCard = document.getElementById('guide-card-' + moduleKey);
+        if (oldCard) oldCard.remove();
+
+        // Remove the top-level demo card if it exists (reverting previous change)
+        const oldDemoCard = document.getElementById('demo-card-' + moduleKey);
+        if (oldDemoCard) oldDemoCard.remove();
+
+        const guideCard = document.createElement('div');
+        guideCard.className = 'setup-guide-card';
+        guideCard.id = 'guide-card-' + moduleKey;
+
+        const header = document.createElement('div');
+        header.className = 'guide-collapsible-header';
+        header.innerHTML = `
+          <div class="card-label blue" style="margin-bottom:0; font-size:10px;">HOW TO SET UP</div>
+          <div class="guide-arrow">▼</div>
+        `;
+
+        const content = document.createElement('div');
+        content.className = 'guide-collapse-content';
+
+        header.onclick = () => {
+          content.classList.toggle('expanded');
+          header.querySelector('.guide-arrow').classList.toggle('expanded');
+        };
+
+        let html = '';
+
+        // --- CONTENT LAYOUT ---
+        html += `<div style="margin-top:12px;">`;
+
+        if (guideData.subtitle) {
+          html += `<div style="font-size:11px; color:#fff; margin-bottom:12px;">${guideData.subtitle}</div>`;
+        }
+
+        html += `<div class="guide-columns">`;
+
+        guideData.columns.forEach(col => {
+          // Check condition if present
+          if (col.condition && !col.condition(settingsCache)) return;
+
+          html += `<div class="guide-column">`;
+
+          // Column title/subtitle
+          if ((col.title && col.type !== 'recommended') || col.subtitle) {
+            html += `<div style="margin-bottom:12px;">`;
+            if (col.title && col.type !== 'recommended') {
+              html += `<div style="font-size:12px; font-weight:700; color:var(--text-color); margin-bottom:2px;">${col.title}</div>`;
+            }
+            if (col.subtitle) {
+              html += `<div style="font-size:10px; color:var(--text-muted); line-height:1.4;">${col.subtitle}</div>`;
+            }
+            html += `</div>`;
+          }
+
+          if (col.type === 'recommended') {
+            html += `
+              <div style="font-size:12px; font-weight:700; color:var(--text-color); margin-bottom:12px; display:flex; align-items:center; gap:8px;">
+                <span style="font-size:14px;">🔑</span> ${col.title || 'Recommended'}
+              </div>
+              <div class="recommended-values">
+                ${col.values.map(v => `
+                  <div class="value-row">
+                    <div class="value-label">${v.label}:</div>
+                    <div class="value-text">${v.value}</div>
+                    <div class="copy-btn" onclick="copyToClipboard('${v.value}', this)" title="Copy to clipboard">⧉</div>
+                  </div>
+                `).join('')}
+              </div>
+            `;
+          } else {
+            html += `<div class="guide-steps">`;
+            col.steps.forEach(step => {
+              if (step.plain) {
+                html += `<div style="font-size:11px; color:var(--text-muted); line-height:1.6; margin-bottom:10px;">${step.text}</div>`;
+              } else if (step.bullet) {
+                html += `<div class="guide-bullet" style="font-size:11px;">${step.text}</div>`;
+              } else {
+                html += `
+                  <div class="guide-step">
+                    ${step.num ? `<div class="step-number" style="font-size:11px;">${step.num}</div>` : '<div class="step-number"></div>'}
+                    <div class="step-content" style="font-size:11px;">${step.text}</div>
+                  </div>
+                `;
+              }
+            });
+            html += `</div>`;
+          }
+
+          // "See Demo" button at the very bottom of the section (Standard Layout)
+          if (col.demoUrl) {
+            html += `
+              <div class="demo-btn-container" style="margin-top:14px; justify-content:flex-start;">
+                <button class="glass-btn small-glass-btn" onclick="window.open('${col.demoUrl}')">
+                  See Demo
+                </button>
+              </div>
+            `;
+          }
+
+          html += `</div>`; // end column
+        });
+
+        html += `</div>`; // end guide-columns
+        html += `</div>`; // end content container
+
+        content.innerHTML = html;
+        guideCard.appendChild(header);
+        guideCard.appendChild(content);
+        tabContainer.appendChild(guideCard);
+      }
     }
 
     async function saveAllSettings() {
-      if (!settingsCache) return;
+      if (!settingsCache) {
+        console.warn('[Settings] Cache missing, attempting immediate fetch...');
+        try { settingsCache = await fetchSettings(); } catch (e) { return; }
+      }
       const updated = JSON.parse(JSON.stringify(settingsCache));
+
+      // Safety: Ensure global.general exists
+      if (!updated.global) updated.global = {};
+      if (!updated.global.general) updated.global.general = {};
       document.querySelectorAll('[data-path^="global."]').forEach(el => {
         const path = el.dataset.path.split('.');
         const key = path.pop();
@@ -2480,6 +3669,16 @@
           parent[key] = val;
         }
       });
+
+      // Special handling for search platforms array (Opt-Out model)
+      const platformGrid = document.getElementById('search-platforms-grid');
+      if (platformGrid) {
+        // Collect platforms that are NOT selected (meaning they are disabled)
+        const disabled = Array.from(platformGrid.querySelectorAll('.platform-pill:not(.selected)'))
+          .map(p => p.dataset.id);
+        updated.global.general.disabled_search_platforms = disabled;
+        console.log('[Settings] Saving disabled platforms:', disabled);
+      }
 
       const activeTabId = window._activeSettingsTabId;
       if (activeTabId && activeTabId !== 'tab-global') {
@@ -2509,13 +3708,13 @@
       }
 
       try {
+        settingsCache = updated;
         const res = await fetch('/api/settings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(updated)
         });
         if (!res.ok) throw new Error('Save failed');
-        settingsCache = updated;
         // Success feedback
         const btn = document.getElementById('settings-save-btn');
         btn.classList.add('success');
@@ -2529,6 +3728,28 @@
     }
 
     document.getElementById('settings-save-btn').onclick = saveAllSettings;
+    
+    // Sync download folders between tabs with auto-save
+    function setupFolderSync() {
+      const urlInput = document.getElementById('url-download-folder');
+      const settingsInput = document.getElementById('global-download_path');
+      
+      const syncAndSave = (source, target) => {
+        if (target.value !== source.value) {
+          target.value = source.value;
+          saveAllSettings();
+        }
+      };
+
+      urlInput.addEventListener('change', () => syncAndSave(urlInput, settingsInput));
+      settingsInput.addEventListener('change', () => syncAndSave(settingsInput, urlInput));
+      
+      // Also handle input from folder picker (dispatched as 'input')
+      urlInput.addEventListener('input', () => syncAndSave(urlInput, settingsInput));
+      settingsInput.addEventListener('input', () => syncAndSave(settingsInput, urlInput));
+    }
+    
+    setupFolderSync();
 
     // ── FOLDER PICKER ──
     let currentPickerTarget = null;
@@ -2548,17 +3769,17 @@
       position: fixed; inset: 0; z-index: 1000;
       background: rgba(0, 0, 0, 0.8); backdrop-filter: blur(8px);
       display: flex; align-items: center; justify-content: center;
-      padding: 20px;
+      padding: 10px;
       `;
         modal.innerHTML = `
-        <div class="glass-card" style="width: 100%; max-width: 500px; max-height: 80vh; display: flex; flex-direction: column;">
-            <div class="card-label" style="display:flex; justify-content:space-between; align-items:center;">
-              Browse Folders
+        <div class="glass-card" style="width: 100%; max-width: 560px; max-height: 85vh; display: flex; flex-direction: column; padding:14px;">
+            <div class="card-label" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+              Set Download Folder
               <button class="ghost-icon-btn" onclick="closeFolderPicker()" style="width:24px; height:24px;">✕</button>
             </div>
-            <div id="picker-path" style="font-size:11px; color:var(--accent-1); margin-bottom:12px; word-break:break-all; font-family:'Roboto Mono',monospace;"></div>
-            <div id="picker-list" style="flex:1; overflow-y:auto; margin-bottom:14px; min-height:200px;"></div>
-            <div style="display:flex; gap:10px;">
+            <div id="picker-path" style="font-size:11px; color:var(--accent-1); margin-bottom:6px; word-break:break-all; font-family:'Roboto Mono',monospace;"></div>
+            <div id="picker-list" style="flex:1; overflow-y:auto; margin-bottom:8px; min-height:200px;"></div>
+            <div style="display:flex; gap:8px;">
               <button class="glass-btn primary" style="flex:1" onclick="selectCurrentFolder()">Select</button>
               <button class="glass-btn" style="flex:1" onclick="closeFolderPicker()">Cancel</button>
             </div>
@@ -2590,7 +3811,7 @@
         pickerCurrentPath = data.current_path;
         pathEl.textContent = pickerCurrentPath;
 
-        list.innerHTML = data.items.map(item => `
+        list.innerHTML = data.items.filter(item => item.is_dir).map(item => `
         <div class="result-item" onclick="loadFolder('${item.path.replace(/\\/g, '/')}')">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:8px; color:var(--accent-1);">
               <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
@@ -2629,17 +3850,17 @@
           position: fixed; inset: 0; z-index: 1000;
           background: rgba(0, 0, 0, 0.85); backdrop-filter: blur(10px);
           display: flex; align-items: center; justify-content: center;
-          padding: 20px;
+          padding: 10px;
         `;
         modal.innerHTML = `
-          <div class="glass-card" style="width: 100%; max-width: 600px; height: 80vh; display: flex; flex-direction: column; border: 1px solid rgba(255,255,255,0.1);">
-            <div class="card-label blue" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-              <span>DOWNLOAD BROWSER</span>
+          <div class="glass-card" style="width: 100%; max-width: 680px; height: 85vh; display: flex; flex-direction: column; border: 1px solid rgba(255,255,255,0.1); padding:14px;">
+            <div class="card-label" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+              <span>DOWNLOADED FILES</span>
               <button class="ghost-icon-btn" onclick="closeDownloadBrowser()" style="width:24px; height:24px;">✕</button>
             </div>
-            <div id="browser-path" style="font-size:11px; color:var(--accent-1); margin-bottom:12px; word-break:break-all; font-family:'Roboto Mono',monospace; background:rgba(0,0,0,0.2); padding:6px 10px; border-radius:6px;"></div>
-            <div id="browser-list" style="flex:1; overflow-y:auto; margin-bottom:14px; padding-right:4px;"></div>
-            <div style="display:flex; gap:10px;">
+            <div id="browser-path" style="font-size:11px; color:var(--accent-1); margin-bottom:6px; word-break:break-all; font-family:'Roboto Mono',monospace; background:rgba(0,0,0,0.2); padding:4px 8px; border-radius:6px;"></div>
+            <div id="browser-list" style="flex:1; overflow-y:auto; margin-bottom:8px; padding-right:4px;"></div>
+            <div style="display:flex; gap:8px;">
               <button class="glass-btn primary" style="flex:1" onclick="closeDownloadBrowser()">Close</button>
             </div>
           </div>
@@ -2678,13 +3899,13 @@
         // Folders
         folders.forEach(item => {
           html += `
-            <div class="result-item" onclick="loadBrowserContents('${item.path.replace(/\\/g, '/')}')" style="margin-bottom:4px; padding:10px;">
-              <div style="width:32px; height:32px; background:rgba(74,158,255,0.1); border-radius:6px; display:flex; align-items:center; justify-content:center; margin-right:12px;">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent-1)" stroke-width="2">
+            <div class="result-item" onclick="loadBrowserContents('${item.path.replace(/\\/g, '/')}')" style="margin-bottom:2px; padding:6px 8px;">
+              <div style="width:26px; height:26px; background:rgba(74,158,255,0.1); border-radius:5px; display:flex; align-items:center; justify-content:center; margin-right:8px;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent-1)" stroke-width="2">
                   <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
                 </svg>
               </div>
-              <div class="result-title" style="font-size:13px;">${item.name}</div>
+              <div class="result-title" style="font-size:11px;">${item.name}</div>
             </div>
           `;
         });
@@ -2695,21 +3916,18 @@
         files.forEach(item => {
           const sizeMB = (item.size / (1024 * 1024)).toFixed(1);
           html += `
-            <div class="result-item" onclick="openFile('${item.path.replace(/\\/g, '/')}')" style="margin-bottom:4px; padding:10px;">
-              <div style="width:32px; height:32px; background:rgba(255,255,255,0.05); border-radius:6px; display:flex; align-items:center; justify-content:center; margin-right:12px;">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2">
+            <div class="result-item" onclick="openFile('${item.path.replace(/\\/g, '/')}')" style="margin-bottom:2px; padding:6px 8px;">
+              <div style="width:26px; height:26px; background:rgba(255,255,255,0.05); border-radius:5px; display:flex; align-items:center; justify-content:center; margin-right:8px;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2">
                   <path d="M9 18V5l12-2v13"/>
                   <circle cx="6" cy="18" r="3"/>
                   <circle cx="18" cy="16" r="3"/>
                 </svg>
               </div>
               <div class="result-info">
-                <div class="result-title" style="font-size:13px;">${item.name}</div>
+                <div class="result-title" style="font-size:11px;">${item.name}</div>
                 <div style="font-size:10px; color:var(--text-muted);">${sizeMB} MB</div>
               </div>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent-1)" stroke-width="2" style="margin-left:auto; opacity:0.6;">
-                <polygon points="5 3 19 12 5 21 5 3"/>
-              </svg>
             </div>
           `;
         });
@@ -2727,7 +3945,10 @@
     function openFile(path) {
       window.open('/api/view?path=' + encodeURIComponent(path), '_blank');
     }
+
+    initSettings();
   </script>
+  <div id="custom-tooltip"></div>
 </body>
 
 </html>

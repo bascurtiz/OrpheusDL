@@ -60,7 +60,30 @@ def create_aiohttp_session():
         trust_env=True
     )
 
-sanitise_name = lambda name: re.sub(r'[:]', ' - ', re.sub(r'[\\/*?"<>|$]', '', re.sub(r'[\x00-\x1F\x7F]', '', str(name).strip()))) if name else ''
+sanitise_name = lambda name: re.sub(r'[:]', ' - ', re.sub(r'[\\/*?"<>|$]', '', re.sub(r'[\x00-\x1F\x7F]', '', (", ".join(map(str, name)) if isinstance(name, list) else str(name)).strip()))) if name else ''
+
+
+def get_primary_artist(artist_data):
+    """
+    Extract only the primary (first) artist from a list or a string with separators.
+    Used to standardize the ALBUMARTIST tag across all platforms.
+    """
+    if not artist_data:
+        return ""
+    
+    # Handle list input (preferred)
+    if isinstance(artist_data, list):
+        return str(artist_data[0]) if artist_data else ""
+    
+    # Handle string input (fallback for platforms that return joined strings)
+    if isinstance(artist_data, str):
+        # Only split by high-confidence separators that are unlikely to be in a group name.
+        # We avoid splitting by " & ", " and ", or ", " for strings because of names like "Earth, Wind & Fire".
+        # If a platform wants to specify multiple artists, it should pass a list instead.
+        parts = re.split(r' / | feat\. | ft\. ', artist_data, flags=re.IGNORECASE)
+        return parts[0].strip()
+    
+    return str(artist_data)
 
 
 def fix_byte_limit(path: str, byte_limit=250):

@@ -241,6 +241,7 @@ class OrpheusOptions:
     disable_subscription_check: bool
     quality_tier: QualityEnum  # Here because of subscription checking
     default_cover_options: CoverOptions
+    play_sound_on_finish: bool = True
 
 
 @dataclass
@@ -281,6 +282,7 @@ class Tags:
     comment: Optional[str] = None
     label: Optional[str] = None
     catalog_number: Optional[str] = None
+    track_url: Optional[str] = None
     extra_tags: Optional[dict] = field(default_factory=dict)
 
 
