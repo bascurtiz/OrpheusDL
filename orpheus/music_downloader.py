@@ -391,6 +391,19 @@ class Downloader:
             pass
         return 'sequential'  # Default fallback
 
+    def _handle_spotify_rate_limit_pause(self, download_result, index, number_of_tracks, service_name_override=None):
+        """Helper to handle the Spotify rate-limiting pause consistently.
+        Only pauses if download was successful, not the last track, and service is Spotify.
+        """
+        service_name = service_name_override if service_name_override else (self.service_name.lower() if hasattr(self, 'service_name') and self.service_name else "")
+        if (service_name == 'spotify' and index < number_of_tracks and 
+            download_result is not None and download_result != "RATE_LIMITED" and download_result != "SKIPPED"):
+            pause_seconds = self._get_spotify_pause_seconds()
+            self.print(f'Pausing {pause_seconds} seconds to prevent rate limiting...', drop_level=1)
+            time.sleep(pause_seconds)
+            return True
+        return False
+
     def _get_status_symbols(self):
         """Get platform-appropriate status symbols with universal colors"""
         # ANSI color codes that work across Windows, macOS, and Linux
@@ -1049,11 +1062,8 @@ class Downloader:
                     
                     # Add pause between downloads for Spotify/YouTube to prevent rate limiting
                     # Only pause if track was actually downloaded (not skipped) and not the last track
-                    if (service_name_lower == 'spotify' and index < number_of_tracks and 
-                        download_result is not None and download_result != "RATE_LIMITED" and download_result != "SKIPPED"):
-                        pause_seconds = self._get_spotify_pause_seconds()
-                        self.print(f'Pausing {pause_seconds} seconds to prevent rate limiting...', drop_level=1)
-                        time.sleep(pause_seconds)
+                    if self._handle_spotify_rate_limit_pause(download_result, index, number_of_tracks, service_name_override=service_name_lower):
+                        pass # Pause handled by helper
                     elif (service_name_lower == 'youtube' and index < number_of_tracks and 
                         download_result is not None and download_result != "RATE_LIMITED" and download_result != "SKIPPED"):
                         pause_seconds = self._get_youtube_pause_seconds()
@@ -1485,11 +1495,7 @@ class Downloader:
                     
                     # Add pause between downloads for Spotify/YouTube to prevent rate limiting
                     # Only pause if track was actually downloaded (not skipped) and not the last track
-                    if (service_name_lower == 'spotify' and index < number_of_tracks and 
-                        download_result is not None and download_result != "RATE_LIMITED" and download_result != "SKIPPED"):
-                        pause_seconds = self._get_spotify_pause_seconds()
-                        self.print(f'Pausing {pause_seconds} seconds to prevent rate limiting...', drop_level=1)
-                        time.sleep(pause_seconds)
+                    if self._handle_spotify_rate_limit_pause(download_result, index, number_of_tracks, service_name_override=service_name_lower):
                         print()  # Add blank line after pause message for consistent spacing with playlists
                     elif (service_name_lower == 'youtube' and index < number_of_tracks and 
                         download_result is not None and download_result != "RATE_LIMITED" and download_result != "SKIPPED"):
@@ -1800,11 +1806,7 @@ class Downloader:
                     
                     # Add pause between downloads for Spotify/YouTube to prevent rate limiting
                     # Only pause if track was actually downloaded (not skipped) and not the last track
-                    if (service_name_lower == 'spotify' and index < number_of_tracks_new and 
-                        download_result is not None and download_result != "RATE_LIMITED" and download_result != "SKIPPED"):
-                        pause_seconds = self._get_spotify_pause_seconds()
-                        self.print(f'Pausing {pause_seconds} seconds to prevent rate limiting...', drop_level=1)
-                        time.sleep(pause_seconds)
+                    if self._handle_spotify_rate_limit_pause(download_result, index, number_of_tracks_new, service_name_override=service_name_lower):
                         print()  # Add blank line after pause message for consistent spacing
                     elif (service_name_lower == 'youtube' and index < number_of_tracks_new and 
                         download_result is not None and download_result != "RATE_LIMITED" and download_result != "SKIPPED"):
