@@ -46,10 +46,8 @@ Follow these steps to get a local copy of Orpheus up and running:
 ### Installation
 
 1. Open up cmd/terminal and cd into a place where you want to save Orpheus<br>
-2. a.   `git clone https://github.com/bascurtiz/OrpheusDL && cd OrpheusDL && pip install --upgrade --ignore-installed -r requirements.txt`<br>
-      <sub>*(use pip3 on macOS)*</sub><br>
-   b.   `pip install --no-deps --target vendor/librespot git+https://github.com/kokarare1212/librespot-python`<br>
-      <sub>*(use pip3 on macOS)*</sub><br>
+2. `git clone https://github.com/bascurtiz/OrpheusDL && cd OrpheusDL && pip install --upgrade --ignore-installed -r requirements.txt`<br>
+   <sub>*(use pip3 on macOS)*</sub><br>
  
 3. a.   `python orpheus.py settings refresh`<br>
        <sub>*(use python3 on macOS)*</sub><br>

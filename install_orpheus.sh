@@ -15,7 +15,7 @@ rm -rf OrpheusDL
 echo "[*] Installing base packages..."
 
 pkg update -y && pkg upgrade -y
-pkg install -y python git libjpeg-turbo ffmpeg deno
+pkg install -y python git libjpeg-turbo ffmpeg
 
 # -------------------------------
 # CLONE MAIN REPO
@@ -40,14 +40,6 @@ echo "[*] Installing requirements..."
 
 pip install --upgrade pip
 pip install --upgrade --ignore-installed -r requirements.txt
-
-# -------------------------------
-# INSTALL LIBRESPOT
-# -------------------------------
-echo "[*] Installing librespot..."
-
-mkdir -p vendor/librespot
-pip install --no-deps --target vendor/librespot git+https://github.com/kokarare1212/librespot-python
 
 # -------------------------------
 # INITIAL SETUP
@@ -98,6 +90,6 @@ python orpheus.py
 # -------------------------------
 echo ""
 echo "=== HOW TO RUN LATER ==="
-echo " "
-echo "cd OrpheusDL && source venv/bin/activate && python webui.py"
-echo " "
+echo "cd OrpheusDL"
+echo "source venv/bin/activate"
+echo "python orpheus.py"
