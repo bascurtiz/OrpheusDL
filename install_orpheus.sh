@@ -47,7 +47,9 @@ REQ_CMD="pip install --upgrade --ignore-installed --prefer-binary -r requirement
 # Use a compatibility constraint to keep startup dependencies installable.
 if [ -n "${TERMUX_VERSION:-}" ] || uname -a | grep -qi "android"; then
     echo "[*] Detected Termux/Android. Applying compatibility constraints..."
-    CONSTRAINTS_FILE="/tmp/orpheus-termux-constraints.txt"
+    TMP_WRITE_DIR="${TMPDIR:-$HOME/.cache}"
+    mkdir -p "$TMP_WRITE_DIR"
+    CONSTRAINTS_FILE="$TMP_WRITE_DIR/orpheus-termux-constraints.txt"
     cat > "$CONSTRAINTS_FILE" <<'EOF'
 pydantic<2
 EOF
@@ -61,14 +63,14 @@ fi
 
 # Ensure core HTTP/runtime deps are always present even if the full install fails.
 # This avoids the common "Missing dependency: requests" fatal error on startup.
-pip install --upgrade requests urllib3 flask certifi || {
+pip install --upgrade requests urllib3 flask certifi pillow || {
     echo "[FATAL] Failed to install core runtime dependencies."
     exit 1
 }
 
-python -c "import requests, urllib3, flask, certifi" || {
+python -c "import requests, urllib3, flask, certifi; from PIL import Image" || {
     echo "[FATAL] Core dependencies are still missing after install attempt."
-    echo "Try: pip install --upgrade requests urllib3 flask certifi"
+    echo "Try: pip install --upgrade requests urllib3 flask certifi pillow"
     exit 1
 }
 
