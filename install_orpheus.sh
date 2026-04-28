@@ -2,6 +2,8 @@
 
 echo "=== OrpheusDL Termux Installer (VENV) ==="
 
+set -u
+
 # -------------------------------
 # CLEAN OLD INSTALL
 # -------------------------------
@@ -39,7 +41,36 @@ source venv/bin/activate
 echo "[*] Installing requirements..."
 
 pip install --upgrade pip
-pip install --upgrade --ignore-installed -r requirements.txt
+REQ_CMD="pip install --upgrade --ignore-installed --prefer-binary -r requirements.txt"
+
+# Termux/Python 3.13 can fail building pydantic-core from source (Rust target issue).
+# Use a compatibility constraint to keep startup dependencies installable.
+if [ -n "${TERMUX_VERSION:-}" ] || uname -a | grep -qi "android"; then
+    echo "[*] Detected Termux/Android. Applying compatibility constraints..."
+    CONSTRAINTS_FILE="/tmp/orpheus-termux-constraints.txt"
+    cat > "$CONSTRAINTS_FILE" <<'EOF'
+pydantic<2
+EOF
+    REQ_CMD="$REQ_CMD -c $CONSTRAINTS_FILE"
+fi
+
+if ! eval "$REQ_CMD"; then
+    echo "[!] Full requirements install failed."
+    echo "[!] Attempting to install core runtime dependencies needed for startup..."
+fi
+
+# Ensure core HTTP/runtime deps are always present even if the full install fails.
+# This avoids the common "Missing dependency: requests" fatal error on startup.
+pip install --upgrade requests urllib3 flask certifi || {
+    echo "[FATAL] Failed to install core runtime dependencies."
+    exit 1
+}
+
+python -c "import requests, urllib3, flask, certifi" || {
+    echo "[FATAL] Core dependencies are still missing after install attempt."
+    echo "Try: pip install --upgrade requests urllib3 flask certifi"
+    exit 1
+}
 
 # -------------------------------
 # INSTALL LIBRESPOT
