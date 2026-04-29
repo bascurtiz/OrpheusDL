@@ -26,3 +26,4 @@ pfzy
 prompt_toolkit
 pycryptodome
 pywinstyles
+flask
