@@ -60,7 +60,20 @@ def create_aiohttp_session():
         trust_env=True
     )
 
-sanitise_name = lambda name: re.sub(r'[:]', ' - ', re.sub(r'[\\/*?"<>|$]', '', re.sub(r'[\x00-\x1F\x7F]', '', (", ".join(map(str, name)) if isinstance(name, list) else str(name)).strip()))) if name else ''
+def sanitise_name(name):
+    """Make a string safe for file paths; normalize punctuation so colons do not become spaced hyphens."""
+    if not name:
+        return ''
+    s = ", ".join(map(str, name)) if isinstance(name, list) else str(name)
+    s = s.strip()
+    s = re.sub(r'[\x00-\x1F\x7F]', '', s)
+    s = re.sub(r'[\\/*?"<>|$]', '', s)
+    # ':' is illegal on Windows paths; replacing with " - " stacked with ": " and produced " -  " gaps.
+    s = re.sub(r'\s*:\s*', ' \u00b7 ', s)
+    # Qobuz-style "Composer - Work" (spaces around hyphen); keep compact tokens like "24B-96kHz" untouched.
+    s = re.sub(r'\s+-\s+', ' \u00b7 ', s)
+    s = re.sub(r'\s+', ' ', s).strip()
+    return s
 
 
 def get_primary_artist(artist_data):

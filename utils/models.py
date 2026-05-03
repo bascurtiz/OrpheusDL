@@ -322,7 +322,8 @@ class AlbumInfo:
     all_track_cover_jpg_url: Optional[str] = None
     animated_cover_url: Optional[str] = None
     description: Optional[str] = None
-    album_artist: Optional[str] = None
+    # str or list[str]; list is joined with global formatting.metadata_separator in Downloader
+    album_artist: Optional[Union[str, List[str]]] = None
     label: Optional[str] = None
     catalog_number: Optional[str] = None
     track_extra_kwargs: Optional[dict] = field(default_factory=dict)
