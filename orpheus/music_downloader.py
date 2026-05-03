@@ -1150,19 +1150,33 @@ class Downloader:
 
     def _create_album_location(self, path: str, album_id: str, album_info: AlbumInfo) -> str:
         # Clean up album tags and add special explicit and additional formats
-        album_tags = {k: sanitise_name(v) for k, v in asdict(album_info).items()}
+        album_tags = {
+            k: (v if k in ('album_artist', 'tracks') else sanitise_name(v))
+            for k, v in asdict(album_info).items()
+        }
         album_tags['id'] = str(album_id)
-        album_tags['quality'] = f' [{album_info.quality}]' if album_info.quality else ''
+        meta_sep = self.global_settings['formatting'].get('metadata_separator', ';')
+        if album_info.quality:
+            q = str(album_info.quality).replace('/', '\u00b7')
+            album_tags['quality'] = sanitise_name(f' [{q}]')
+        else:
+            album_tags['quality'] = ''
         album_tags['explicit'] = ' 🅴' if album_info.explicit else ''
         album_tags['artist_initials'] = self._get_artist_initials_from_name(album_info)
         
         # Add additional formatting tags if they exist
-        album_tags['album_artist'] = sanitise_name(album_info.album_artist) if album_info.album_artist else album_tags['artist']
+        aa = album_info.album_artist
+        if isinstance(aa, (list, tuple)) and aa:
+            album_tags['album_artist'] = meta_sep.join(sanitise_name(str(x)) for x in aa if x)
+        elif isinstance(aa, str) and aa.strip():
+            album_tags['album_artist'] = sanitise_name(aa)
+        else:
+            album_tags['album_artist'] = album_tags['artist']
         album_tags['label'] = sanitise_name(album_info.label) if album_info.label else ''
         album_tags['catalog_number'] = sanitise_name(album_info.catalog_number) if album_info.catalog_number else ''
 
         # album_path = path + self.global_settings['formatting']['album_format'].format(**album_tags) # OLD
-        album_path_formatted_name = self.global_settings['formatting']['album_format'].format(**album_tags)
+        album_path_formatted_name = self.global_settings['formatting']['album_format'].format(**album_tags).strip()
         album_path = os.path.join(path, album_path_formatted_name)
         # fix path byte limit
         album_path = fix_byte_limit(album_path) + '/'
