@@ -40,7 +40,7 @@ class Orpheus:
                 "search_limit": 25,
                 "disabled_search_platforms": [],
                 "concurrent_downloads": 5,
-                "progress_bar": False
+                "progress_bar": False,
             },
             "artist_downloading":{
                 "return_credited_albums": True,
@@ -347,6 +347,12 @@ class Orpheus:
                     else:
                         module_settings[i][j] = settings_to_parse[j]
                         new_setting_detected = True
+                # Preserve user-defined module keys that are not part of module schemas
+                # (e.g. GUI-only toggles like modules.tidal.throttle).
+                if i in old_settings['modules'] and isinstance(old_settings['modules'][i], dict):
+                    for legacy_key, legacy_value in old_settings['modules'][i].items():
+                        if legacy_key not in module_settings[i]:
+                            module_settings[i][legacy_key] = legacy_value
             else:
                 module_settings.pop(i)
 

@@ -7,6 +7,7 @@ import json
 from enum import Enum
 import uuid
 import time
+import random
 import re
 import platform
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -467,7 +468,15 @@ class Downloader:
             # Fallback to sequential download if concurrent_downloads is 1 or less
             self.print("Using sequential downloads (sync)")
             results = []
+            tidal_cfg = None
+            if hasattr(self, 'service_name') and self.service_name:
+                from utils.tidal_throttle import resolve_tidal_throttle
+                tidal_cfg = resolve_tidal_throttle(
+                    getattr(self, 'full_settings', None), self.service_name
+                )
             for i, (track_info, args) in enumerate(zip(track_list, download_args_list)):
+                if i > 0 and tidal_cfg:
+                    time.sleep(random.uniform(tidal_cfg['delay_min'], tidal_cfg['delay_max']))
                 try:
                     result = self.download_track(**args)
                     results.append((i, result, None))
@@ -491,6 +500,23 @@ class Downloader:
         download_times = []
         concurrent_active = 0
         max_concurrent_seen = 0
+        
+        tidal_cfg = None
+        tidal_start_gate = None
+        tidal_rpm = None
+        if hasattr(self, 'service_name') and self.service_name:
+            from utils.tidal_throttle import (
+                resolve_tidal_throttle,
+                TidalInterTrackGateAsync,
+                RequestsPerMinuteLimiterAsync,
+            )
+            tidal_cfg = resolve_tidal_throttle(
+                getattr(self, 'full_settings', None), self.service_name
+            )
+            if tidal_cfg:
+                tidal_start_gate = TidalInterTrackGateAsync()
+                if tidal_cfg.get('rpm', 0) > 0:
+                    tidal_rpm = RequestsPerMinuteLimiterAsync(tidal_cfg['rpm'])
         
         async def download_worker_async(session, index, args):
             """Async worker function to download a single track - OPTIMIZED VERSION"""
@@ -556,6 +582,8 @@ class Downloader:
                     def get_track_info_wrapper():
                         return self.service.get_track_info(track_id, quality_tier, codec_options, **args.get('extra_kwargs', {}))
                     
+                    if tidal_rpm is not None:
+                        await tidal_rpm.acquire()
                     track_info = await loop.run_in_executor(None, get_track_info_wrapper)
                     meta_sep = self.global_settings['formatting'].get('metadata_separator', ';')
                     track_name = f"{meta_sep.join(track_info.artists)} - {track_info.name}"
@@ -579,6 +607,8 @@ class Downloader:
                                 # Fallback for modules with simpler signatures
                                 return self.service.get_track_download(track_id, quality_tier)
                                 
+                    if tidal_rpm is not None:
+                        await tidal_rpm.acquire()
                     download_info = await loop.run_in_executor(None, get_download_info_wrapper)
                     
                 except Exception as e:
@@ -655,6 +685,10 @@ class Downloader:
                 semaphore = asyncio.Semaphore(concurrent_downloads)
                 
                 async def bounded_download(index, args):
+                    if tidal_start_gate and tidal_cfg:
+                        await tidal_start_gate.wait_turn(
+                            tidal_cfg['delay_min'], tidal_cfg['delay_max']
+                        )
                     async with semaphore:
                         return await download_worker_async(session, index, args)
                 
