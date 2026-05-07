@@ -10,7 +10,7 @@ import time
 import random
 import re
 import platform
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 
 # Lazy import ffmpeg to avoid circular import issues in PyInstaller bundles
 ffmpeg = None
@@ -268,7 +268,19 @@ class Downloader:
                             fetch_id = None
 
                     if fetch_id:
-                        lyrics_info = lyrics_service.get_track_lyrics(fetch_id, **fetch_extra_kwargs)
+                        # Guard against slow/hanging lyrics providers so download completion is not blocked.
+                        lyrics_timeout_sec = 12
+                        executor = ThreadPoolExecutor(max_workers=1)
+                        future = executor.submit(lyrics_service.get_track_lyrics, fetch_id, **fetch_extra_kwargs)
+                        try:
+                            lyrics_info = future.result(timeout=lyrics_timeout_sec)
+                        except FuturesTimeoutError:
+                            future.cancel()
+                            self.print(f'Could not fetch lyrics: request timed out after {lyrics_timeout_sec}s')
+                            lyrics_info = None
+                        finally:
+                            # Do not block shutdown on timed-out provider calls.
+                            executor.shutdown(wait=False, cancel_futures=True)
                         if lyrics_info:
                             track_info.lyrics = lyrics_info.embedded
                             # Pass synced lyrics to the caller via an attribute for saving
