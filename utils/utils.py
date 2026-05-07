@@ -99,27 +99,46 @@ def get_primary_artist(artist_data):
     return str(artist_data)
 
 
+def _truncate_utf8_bytes(value: str, max_bytes: int) -> str:
+    """Truncate a string to max UTF-8 bytes without cutting mid-sequence."""
+    if max_bytes <= 0:
+        return ''
+    encoded = value.encode('utf-8')
+    if len(encoded) <= max_bytes:
+        return value
+    return encoded[:max_bytes].decode('utf-8', 'ignore')
+
+
 def fix_byte_limit(path: str, byte_limit=250):
-    # Try to get relative path, but handle cross-drive paths on Windows
-    try:
-        rel_path = os.path.relpath(path).replace('\\', '/')
-    except ValueError:
-        # On Windows, relpath fails when path is on a different drive
-        # Use the original path with normalized separators instead
-        rel_path = path.replace('\\', '/')
+    """
+    Keep generated paths filename-safe by:
+    - limiting the filename byte size (while preserving extension)
+    - additionally shrinking filename for legacy Windows MAX_PATH safety
+    """
+    normalized_path = os.path.normpath(path)
+    directory, filename = os.path.split(normalized_path)
 
-    # split path into directory and filename
-    directory, filename = os.path.split(rel_path)
+    if not filename:
+        return normalized_path
 
-    # truncate filename if its byte size exceeds the byte_limit
-    filename_bytes = filename.encode('utf-8')
-    fixed_bytes = filename_bytes[:byte_limit]
-    fixed_filename = fixed_bytes.decode('utf-8', 'ignore')
+    stem, ext = os.path.splitext(filename)
+    ext_bytes = len(ext.encode('utf-8'))
+    max_stem_bytes = max(1, byte_limit - ext_bytes)
+    stem = _truncate_utf8_bytes(stem, max_stem_bytes)
+    fixed_filename = f'{stem}{ext}'
+    candidate_path = os.path.join(directory, fixed_filename) if directory else fixed_filename
 
-    # join the directory and truncated filename together
-    if directory:
-        return directory + '/' + fixed_filename
-    return fixed_filename
+    # Windows still commonly hits MAX_PATH (260 incl. null terminator) in non-long-path contexts.
+    if os.name == 'nt':
+        windows_path_limit = 259
+        check_path = os.path.abspath(candidate_path)
+        while len(check_path) > windows_path_limit and len(stem) > 1:
+            stem = _truncate_utf8_bytes(stem, len(stem.encode('utf-8')) - 1)
+            fixed_filename = f'{stem}{ext}'
+            candidate_path = os.path.join(directory, fixed_filename) if directory else fixed_filename
+            check_path = os.path.abspath(candidate_path)
+
+    return candidate_path.replace('\\', '/')
 
 
 r_session = create_requests_session()

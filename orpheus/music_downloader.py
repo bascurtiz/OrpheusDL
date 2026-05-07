@@ -965,9 +965,12 @@ class Downloader:
         playlist_tags['name'] = safe_playlist_name # Use the safe name for path formatting
         playlist_tags['explicit'] = ' 🅴' if playlist_info.explicit else ''
         playlist_path_formatted_name = self.global_settings['formatting']['playlist_format'].format(**playlist_tags)
-        playlist_path = os.path.join(self.path, playlist_path_formatted_name)
+        playlist_path_raw = os.path.join(self.path, playlist_path_formatted_name)
         # fix path byte limit
-        playlist_path = fix_byte_limit(playlist_path) + '/'
+        playlist_path = fix_byte_limit(playlist_path_raw)
+        if playlist_path != playlist_path_raw.replace('\\', '/'):
+            self.print('⚠ Path too long, playlist folder name was truncated for filesystem safety.')
+        playlist_path += '/'
         os.makedirs(playlist_path, exist_ok=True)
         
         if playlist_info.cover_url:
@@ -1251,9 +1254,12 @@ class Downloader:
 
         # album_path = path + self.global_settings['formatting']['album_format'].format(**album_tags) # OLD
         album_path_formatted_name = self.global_settings['formatting']['album_format'].format(**album_tags).strip()
-        album_path = os.path.join(path, album_path_formatted_name)
+        album_path_raw = os.path.join(path, album_path_formatted_name)
         # fix path byte limit
-        album_path = fix_byte_limit(album_path) + '/'
+        album_path = fix_byte_limit(album_path_raw)
+        if album_path != album_path_raw.replace('\\', '/'):
+            self.print('⚠ Path too long, album folder name was truncated for filesystem safety.')
+        album_path += '/'
         os.makedirs(album_path, exist_ok=True)
 
         return album_path
@@ -1338,10 +1344,12 @@ class Downloader:
         track_filename += extension
         
         # Combine with album location
-        track_location = os.path.join(album_location, track_filename)
+        track_location_raw = os.path.join(album_location, track_filename)
         
         # Fix byte limit
-        track_location = fix_byte_limit(track_location)
+        track_location = fix_byte_limit(track_location_raw)
+        if track_location != track_location_raw.replace('\\', '/'):
+            self.print('⚠ Path too long, track filename was truncated for filesystem safety.')
         
         return track_location
 
