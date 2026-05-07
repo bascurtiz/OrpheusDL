@@ -1243,10 +1243,11 @@ class Downloader:
         
         # Add additional formatting tags if they exist
         aa = album_info.album_artist
-        if isinstance(aa, (list, tuple)) and aa:
-            album_tags['album_artist'] = meta_sep.join(sanitise_name(str(x)) for x in aa if x)
-        elif isinstance(aa, str) and aa.strip():
-            album_tags['album_artist'] = sanitise_name(aa)
+        # Keep album_artist compact for folder naming: use the primary artist.
+        # Some providers return very long multi-artist lists which can exceed Windows path limits.
+        primary_album_artist = get_primary_artist(aa)
+        if primary_album_artist:
+            album_tags['album_artist'] = sanitise_name(primary_album_artist)
         else:
             album_tags['album_artist'] = album_tags['artist']
         album_tags['label'] = sanitise_name(album_info.label) if album_info.label else ''

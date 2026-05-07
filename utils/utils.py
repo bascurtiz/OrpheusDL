@@ -130,7 +130,8 @@ def fix_byte_limit(path: str, byte_limit=250):
 
     # Windows still commonly hits MAX_PATH (260 incl. null terminator) in non-long-path contexts.
     if os.name == 'nt':
-        windows_path_limit = 259
+        # Keep headroom below MAX_PATH for shell/Explorer operations (e.g. Recycle Bin move).
+        windows_path_limit = 220
         check_path = os.path.abspath(candidate_path)
         while len(check_path) > windows_path_limit and len(stem) > 1:
             stem = _truncate_utf8_bytes(stem, len(stem.encode('utf-8')) - 1)
