@@ -1,0 +1,227 @@
+diff --git a/orpheus/music_downloader.py b/orpheus/music_downloader.py
+index 8845377..d35372e 100644
+--- a/orpheus/music_downloader.py
++++ b/orpheus/music_downloader.py
+@@ -83,6 +83,46 @@ def beauty_format_seconds(seconds: int) -> str:
+     return f"{time_data.tm_min}:{time_data.tm_sec:02d}"
+ 
+ 
++def truncate_utf8_bytes(value: str, max_bytes: int) -> str:
++    """Truncate a string to max UTF-8 bytes without splitting a multibyte sequence."""
++    if max_bytes <= 0:
++        return ''
++    encoded = value.encode('utf-8')
++    if len(encoded) <= max_bytes:
++        return value
++    return encoded[:max_bytes].decode('utf-8', 'ignore')
++
++
++def truncate_utf8_bytes_keep_suffix(value: str, max_bytes: int) -> str:
++    """
++    Truncate to max UTF-8 bytes while preserving common release suffixes
++    like "-TI-FLAC", "-QB-FLAC", "-SP-OGG" when present.
++    """
++    if max_bytes <= 0:
++        return ''
++    encoded_len = len(value.encode('utf-8'))
++    if encoded_len <= max_bytes:
++        return value
++
++    # Preserve terminal marker chunks (e.g. -TI-FLAC) if possible.
++    # Keep this conservative so arbitrary names are not over-processed.
++    suffix_match = re.search(r'(-[A-Z0-9]{2,8}(?:-[A-Z0-9]{2,12}){1,3})$', value)
++    if not suffix_match:
++        return truncate_utf8_bytes(value, max_bytes)
++
++    suffix = suffix_match.group(1)
++    suffix_bytes = len(suffix.encode('utf-8'))
++    if suffix_bytes >= max_bytes:
++        return truncate_utf8_bytes(value, max_bytes)
++
++    prefix = value[:-len(suffix)]
++    prefix_budget = max_bytes - suffix_bytes
++    trimmed_prefix = truncate_utf8_bytes(prefix, prefix_budget).rstrip(' .-_')
++    if not trimmed_prefix:
++        return truncate_utf8_bytes(value, max_bytes)
++    return f'{trimmed_prefix}{suffix}'
++
++
+ def simplify_error_message(error_str: str) -> str:
+     """Convert complex error messages into user-friendly one-liners"""
+     error_lower = error_str.lower()
+@@ -1295,7 +1335,10 @@ class Downloader:
+         album_path_raw = os.path.join(path, album_path_formatted_name)
+         # fix path byte limit
+         album_path = fix_byte_limit(album_path_raw)
+-        if album_path != album_path_raw.replace('\\', '/'):
++        if (
++            album_path != album_path_raw.replace('\\', '/')
++            and self.global_settings.get('advanced', {}).get('debug_mode', False)
++        ):
+             self.print('âš  Path too long, album folder name was truncated for filesystem safety.')
+         album_path += '/'
+         os.makedirs(album_path, exist_ok=True)
+@@ -1324,6 +1367,12 @@ class Downloader:
+         track_tags['label'] = sanitise_name(track_info.tags.label) if track_info.tags.label else ''
+         track_tags['catalog_number'] = sanitise_name(track_info.tags.catalog_number) if track_info.tags.catalog_number else ''
+         track_tags['release_date'] = track_info.tags.release_date if track_info.tags.release_date else ''
++        # Align formatting {release_year} with canonical release_date metadata when present.
++        # This avoids folder names showing a reissue year while embedded tags show original date.
++        if track_info.tags.release_date:
++            match = re.match(r'^\s*(\d{4})', str(track_info.tags.release_date))
++            if match:
++                track_tags['release_year'] = match.group(1)
+         track_tags['genres'] = meta_sep.join(map(str, track_info.tags.genres)) if track_info.tags.genres else ''
+         
+         # Add all documented format variables from GUI with default values
+@@ -1359,9 +1408,87 @@ class Downloader:
+             format_string = self.global_settings['formatting']['single_full_path_format']
+         else:  # Track in album/playlist
+             format_string = self.global_settings['formatting']['track_filename_format']
++
++        # Keep both artist and title visible for very long single-track paths.
++        if is_single_track_download and '{artist}' in format_string and '{name}' in format_string:
++            min_artist_bytes = 24
++            min_name_bytes = 24
++            max_artist_bytes = 88
++            max_name_bytes = 96
++
++            track_tags['artist'] = truncate_utf8_bytes(track_tags.get('artist', ''), max_artist_bytes).rstrip(' .-_')
++            track_tags['name'] = truncate_utf8_bytes(track_tags.get('name', ''), max_name_bytes).rstrip(' .-_')
++            if not track_tags['artist']:
++                track_tags['artist'] = 'Unknown Artist'
++            if not track_tags['name']:
++                track_tags['name'] = 'Unknown Title'
++
++            # Iteratively rebalance by shrinking the longer field until key path components fit.
++            for _ in range(512):
++                candidate_rel = format_string.format(**track_tags).replace('\\', '/')
++                candidate_dir, candidate_name = os.path.split(candidate_rel)
++
++                dir_segments_ok = all(
++                    len(segment.encode('utf-8')) <= 120
++                    for segment in candidate_dir.split('/')
++                    if segment
++                )
++                filename_component_ok = len(candidate_name.encode('utf-8')) <= 150
++                projected_total_ok = len(os.path.abspath(os.path.join(album_location, candidate_rel + '.flac'))) <= 220
++
++                if dir_segments_ok and filename_component_ok and projected_total_ok:
++                    break
++
++                artist_bytes = len(track_tags['artist'].encode('utf-8'))
++                name_bytes = len(track_tags['name'].encode('utf-8'))
++                can_shrink_artist = artist_bytes > min_artist_bytes
++                can_shrink_name = name_bytes > min_name_bytes
++
++                if not can_shrink_artist and not can_shrink_name:
++                    break
++
++                if can_shrink_artist and (not can_shrink_name or artist_bytes >= name_bytes):
++                    track_tags['artist'] = truncate_utf8_bytes(track_tags['artist'], artist_bytes - 1).rstrip(' .-_')
++                    if not track_tags['artist']:
++                        track_tags['artist'] = 'Unknown Artist'
++                else:
++                    track_tags['name'] = truncate_utf8_bytes(track_tags['name'], name_bytes - 1).rstrip(' .-_')
++                    if not track_tags['name']:
++                        track_tags['name'] = 'Unknown Title'
++
++            # Keep aliases in sync after balancing.
++            track_tags['track_name'] = track_tags.get('name', '')
++            track_tags['track_artist'] = track_tags.get('artist', '')
+         
+         # Format the filename
+         track_filename = format_string.format(**track_tags)
++
++        # For single full path formats, users may include nested folder segments.
++        # Truncate each directory segment to stay within Windows component limits.
++        if is_single_track_download and ('/' in track_filename or '\\' in track_filename):
++            track_filename = track_filename.replace('\\', '/')
++            rel_dir, rel_name = os.path.split(track_filename)
++            if rel_dir:
++                dir_was_truncated = False
++                safe_segments = []
++                for segment in rel_dir.split('/'):
++                    if not segment:
++                        continue
++                    # Avoid early hard-cut here; preserve suffix tokens (e.g. -TI-FLAC) first.
++                    compact_segment = self._compact_path_tag(segment, max_len=400)
++                    # Keep each folder component comfortably below Windows per-component limits.
++                    compact_segment = truncate_utf8_bytes_keep_suffix(compact_segment, 120).rstrip(' .-_')
++                    if not compact_segment:
++                        compact_segment = 'untitled'
++                    if compact_segment != segment:
++                        dir_was_truncated = True
++                    safe_segments.append(compact_segment)
++
++                safe_dir = '/'.join(safe_segments)
++                track_filename = f'{safe_dir}/{rel_name}' if rel_name else safe_dir
++
++                if dir_was_truncated and self.global_settings.get('advanced', {}).get('debug_mode', False):
++                    self.print('âš  Path too long, single folder name was truncated for filesystem safety.')
+         
+         # Add file extension based on codec (or override when e.g. Tidal remuxes Atmos to M4A)
+         # AC4/EAC3 (Dolby Atmos): use .m4a so output is always M4A (MPEG-4 audio) per Tidal convention
+@@ -1718,10 +1845,19 @@ class Downloader:
+             print()
+             if cover_temp_location: silentremove(cover_temp_location)
+         elif number_of_tracks == 1:
+-            # Single-track albums go directly to track download without album header or completion message
++            # Single-track albums go directly to track download without album header or completion message.
++            # Pass album_info so download_track can save external album files in the exact resolved track folder.
+             single_track_item = album_info.tracks[0]
+             track_id_to_download = single_track_item.id if hasattr(single_track_item, 'id') else single_track_item # Check for .id attribute
+-            self.download_track(track_id_to_download, album_location=path, number_of_tracks=1, main_artist=artist_name, indent_level=indent_level, extra_kwargs=album_info.track_extra_kwargs)
++            self.download_track(
++                track_id_to_download,
++                album_location=path,
++                number_of_tracks=1,
++                main_artist=artist_name,
++                indent_level=indent_level,
++                extra_kwargs=album_info.track_extra_kwargs,
++                album_info_for_single=album_info
++            )
+ 
+         return album_info.tracks
+ 
+@@ -2167,6 +2303,11 @@ class Downloader:
+             album_location, track_info,
+             override_codec=getattr(download_info, 'different_codec', None)
+         )
++        # Ensure parent directory exists for custom single path formats that include subfolders.
++        track_parent_dir = os.path.dirname(track_location)
++        if track_parent_dir:
++            await loop.run_in_executor(None, lambda: os.makedirs(track_parent_dir, exist_ok=True))
++
+         # Check if file already exists - use thread pool for file checks
+         if await loop.run_in_executor(None, os.path.isfile, track_location):
+             return "ALREADY_EXISTS"
+@@ -2363,7 +2504,7 @@ class Downloader:
+             
+             return None  # Return None to indicate failure
+ 
+-    def download_track(self, track_id, album_location='', main_artist='', track_index=0, number_of_tracks=0, cover_temp_location='', indent_level=1, m3u_playlist=None, extra_kwargs={}, verbose=True):
++    def download_track(self, track_id, album_location='', main_artist='', track_index=0, number_of_tracks=0, cover_temp_location='', indent_level=1, m3u_playlist=None, extra_kwargs={}, verbose=True, album_info_for_single=None):
+         self.set_indent_number(indent_level)
+         # Aliasing for convenience.
+         d_print = self.oprinter.oprint
+@@ -2658,6 +2799,19 @@ class Downloader:
+             album_location = self.path
+         track_location = self._create_track_location(album_location, track_info)
+ 
++        # Ensure parent directory exists for custom single path formats that include subfolders.
++        track_parent_dir = os.path.dirname(track_location)
++        if track_parent_dir:
++            os.makedirs(track_parent_dir, exist_ok=True)
++
++        # Single-track album downloads should save external album files in the same folder as the track.
++        if album_info_for_single and track_parent_dir:
++            single_album_path = track_parent_dir if track_parent_dir.endswith('/') else track_parent_dir + '/'
++            if album_info_for_single.booklet_url and not os.path.exists(single_album_path + 'Booklet.pdf'):
++                self.print('Downloading booklet')
++                download_file(album_info_for_single.booklet_url, single_album_path + 'Booklet.pdf')
++            self._download_album_files(single_album_path, album_info_for_single)
++
+ 
+         if os.path.exists(track_location):
+             d_print(f'Track file already exists')
