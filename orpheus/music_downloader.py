@@ -284,6 +284,17 @@ class Downloader:
         self.print = self.oprinter.oprint
         self.set_indent_number = self.oprinter.set_indent_number
 
+        self.track_download_count = 0
+        self.track_skipped_count = 0
+
+        self.track_not_streamable_count = 0
+        self.tracks_not_streamable = []
+
+        self.track_download_failed_count = 0
+        self.albums_with_failed_tracks = []
+
+        self.total_download_time: float = 0
+
     def _fetch_metadata(self, track_info: TrackInfo):
         """Fetches lyrics and credits using either the main service or third-party modules."""
         # 1. Fetch Lyrics
@@ -938,6 +949,10 @@ class Downloader:
         actual_already_existed = sum(1 for r in results if r and r[2] is None and r[1] is None)  # Already existed
         actual_failed = sum(1 for r in results if r and r[2] is not None)  # Failed with error
         
+        self.track_download_count += actual_downloaded
+        self.track_skipped_count += actual_already_existed
+        self.track_download_failed_count += actual_failed
+
         # Show final summary only when there are failures
         if actual_failed > 0:
             # Check if most failures are SoundCloud FFmpeg-related
@@ -1684,6 +1699,12 @@ class Downloader:
                 # Download tracks concurrently
                 results = self._concurrent_download_tracks(album_info.tracks, download_args_list, concurrent_downloads, performance_summary_indent=0)
                 
+                for result in results:
+                    if(isinstance(result[2], Exception)):
+                        # self.albums_with_failed_tracks.append(album_info.album_id)
+                        # self.albums_with_failed_tracks.append(album_info.album_id)
+                        self.albums_with_failed_tracks.append(list(album_info.track_extra_kwargs['data'].values())[result[0]]['album']['id'])
+
                 # Process results and collect rate-limited tracks
                 # (Errors are already reported by concurrent download progress monitor)
                 rate_limited_tracks = []
@@ -2636,6 +2657,18 @@ class Downloader:
                 safe_extra_kwargs = extra_kwargs if extra_kwargs is not None else {}
                 track_info = self.service.get_track_info(track_id, quality_tier, codec_options, **safe_extra_kwargs)
 
+                if track_info.error:
+                    if "is not streamable" in track_info.error:
+                        print(f'NOT STREAMABLE: {track_info}')
+                        self.track_not_streamable_count +=1
+                        self.tracks_not_streamable.append(track_info.album_id)
+                    else:
+                        self.track_download_failed_count +=1
+                        self.albums_with_failed_tracks.append(track_info.album_id)
+
+                    self.print(track_info.error)
+                    self.print(f'=== Track {track_id} failed ===', drop_level=1)
+
                 # If we got track info, break out of retry loop
                 if track_info is not None:
                     break
@@ -2846,6 +2879,7 @@ class Downloader:
             
             symbols = self._get_status_symbols()
             d_print(f'=== {symbols["skip"]} Track skipped ===', drop_level=header_drop_level)
+            self.track_skipped_count +=1
 
             return return_with_blank_line("SKIPPED")
 
@@ -3201,6 +3235,7 @@ class Downloader:
 
             symbols = self._get_status_symbols()
             d_print(f'=== {symbols["success"]} Track completed ===', drop_level=header_drop_level)
+            self.track_download_count+=1
 
             # Clean up temporary artwork file
             if artwork_path and os.path.exists(artwork_path):
@@ -3434,7 +3469,7 @@ class Downloader:
         if not module_name:
             module_name = self.service_name
         return {
-            'should_resize': True, # Always attempt resizing to respect the user's resolution setting
+            'should_resize': ModuleFlags.needs_cover_resize in self.module_settings[module_name].flags,
             'resolution': self.global_settings['covers']['external_resolution'] if is_external else self.global_settings['covers']['main_resolution'],
             'compression': self.global_settings['covers']['external_compression'] if is_external else self.global_settings['covers']['main_compression'],
             'format': self.global_settings['covers']['external_format'] if is_external else 'jpg'
