@@ -450,6 +450,7 @@ def get_clean_env():
     """Get a clean environment for subprocesses to avoid PyInstaller library conflicts."""
     import os
     import sys
+    import platform as _platform
     env = os.environ.copy()
     
     # Only strip library paths if we are in a frozen (PyInstaller) environment
@@ -465,8 +466,122 @@ def get_clean_env():
             env['LD_LIBRARY_PATH'] = env['LD_LIBRARY_PATH_ORIG']
         if has_orig_dyld:
             env['DYLD_LIBRARY_PATH'] = env['DYLD_LIBRARY_PATH_ORIG']
+
+    # Windows: PyInstaller onefile extracts DLLs under _MEIPASS on PATH. Native tools
+    # (Shaka Packager, ffmpeg) can load the wrong DLLs and crash (exit 0xC0000005).
+    if is_frozen and _platform.system() == 'Windows':
+        meipass = getattr(sys, '_MEIPASS', None)
+        if meipass:
+            meipass_norm = os.path.normcase(os.path.abspath(meipass))
+            cleaned_path = []
+            for entry in env.get('PATH', '').split(os.pathsep):
+                if not entry:
+                    continue
+                try:
+                    entry_norm = os.path.normcase(os.path.abspath(entry))
+                except OSError:
+                    cleaned_path.append(entry)
+                    continue
+                if entry_norm == meipass_norm or entry_norm.startswith(meipass_norm + os.sep):
+                    continue
+                cleaned_path.append(entry)
+            env['PATH'] = os.pathsep.join(cleaned_path)
     
     return env
+
+
+_SHAKA_PACKAGER_NAMES = {
+    'Windows': ('packager-win-x64.exe', 'packager-win.exe', 'shaka-packager.exe'),
+    'Darwin': ('packager-osx-x64', 'packager-osx', 'shaka-packager'),
+    'Linux': ('packager-linux-x64', 'packager-linux', 'shaka-packager'),
+}
+
+
+def _shaka_packager_search_roots():
+    """Directories to search for the Shaka Packager binary (app root, bundle, cwd)."""
+    import sys
+    roots = []
+    seen = set()
+
+    def _add(path):
+        if not path:
+            return
+        try:
+            key = os.path.normcase(os.path.abspath(path))
+        except OSError:
+            return
+        if key not in seen and os.path.isdir(path):
+            seen.add(key)
+            roots.append(path)
+
+    if getattr(sys, 'frozen', False):
+        _add(os.path.dirname(os.path.abspath(sys.executable)))
+        meipass = getattr(sys, '_MEIPASS', None)
+        if meipass:
+            _add(meipass)
+    else:
+        try:
+            _add(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        except OSError:
+            pass
+    _add(os.getcwd())
+    return roots
+
+
+def resolve_shaka_packager():
+    """Return absolute path to Shaka Packager, or None if not found."""
+    import platform as _platform
+    import shutil
+    from pathlib import Path
+
+    names = _SHAKA_PACKAGER_NAMES.get(_platform.system())
+    if not names:
+        return None
+
+    for root in _shaka_packager_search_roots():
+        for name in names:
+            candidate = Path(root) / name
+            if candidate.is_file() and candidate.stat().st_size > 0:
+                return candidate.resolve()
+
+    env = get_clean_env()
+    for name in names:
+        found = shutil.which(name, path=env.get('PATH'))
+        if found:
+            path = Path(found)
+            if path.is_file() and path.stat().st_size > 0:
+                return path.resolve()
+    return None
+
+
+def ensure_shaka_packager_in_data_dir(data_dir: str) -> str | None:
+    """
+    Copy bundled Shaka Packager into the writable data directory (frozen builds).
+    Returns the packager path if available.
+    """
+    import shutil
+    import platform as _platform
+
+    resolved = resolve_shaka_packager()
+    if not resolved:
+        return None
+
+    if not data_dir:
+        return str(resolved)
+
+    names = _SHAKA_PACKAGER_NAMES.get(_platform.system(), ())
+    dest_name = names[0] if names else resolved.name
+    dest = os.path.join(data_dir, dest_name)
+    src = str(resolved)
+
+    try:
+        if os.path.normcase(os.path.abspath(src)) == os.path.normcase(os.path.abspath(dest)):
+            return dest
+        if not os.path.isfile(dest) or os.path.getsize(dest) < os.path.getsize(src):
+            shutil.copy2(src, dest)
+    except OSError:
+        return src
+    return dest
 
 _ffmpeg_cache = None
 

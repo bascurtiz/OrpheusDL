@@ -223,6 +223,13 @@ def simplify_error_message(error_str: str) -> str:
             "Download it at: https://github.com/shaka-project/shaka-packager/releases/latest\n"
             "Place it in the same folder as orpheus.py (packager-win-x64.exe on Windows)."
         )
+    if '3221225477' in error_str or '-1073741819' in error_str or 'access violation' in error_lower:
+        if 'packager' in error_lower or 'shaka' in error_lower or 'key=' in error_lower:
+            return (
+                "Shaka Packager crashed while decrypting (Windows access violation).\n"
+                "Install Microsoft Visual C++ 2015–2022 Redistributable (x64), ensure "
+                "packager-win-x64.exe is next to the app, then retry."
+            )
 
     # SoundCloud HLS streaming errors
     if 'soundcloud' in error_lower and ('hls' in error_lower or 'hls_unexpected_error_in_try_block' in error_lower):
