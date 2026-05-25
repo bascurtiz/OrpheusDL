@@ -268,6 +268,7 @@ class Tags:
     composer: Optional[str] = None
     track_number: Optional[int] = None
     total_tracks: Optional[int] = None
+    playlist_position: Optional[int] = None  # 1-based index when downloaded from a playlist
     copyright: Optional[str] = None
     isrc: Optional[str] = None
     upc: Optional[str] = None

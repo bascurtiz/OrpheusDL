@@ -1,4 +1,5 @@
 import logging, os
+import sys
 import shutil
 import unicodedata
 from dataclasses import asdict
@@ -53,7 +54,8 @@ PLATFORM_COLORS = {
     "idagio": "\033[35m",        # Magenta (#5C34FE -> magenta)
     "bugs": "\033[31m",          # Red (#FF3B28 -> red)
     "nugs": "\033[31m",          # Red (#C83B30 -> red)
-    "youtube": "\033[91m"        # Bright Red (YouTube Brand Color)
+    "youtube": "\033[91m",       # Bright Red (YouTube Brand Color)
+    "amazon music": "\033[38;2;37;209;218m",  # Amazon Music brand (#25D1DA)
 }
 
 RESET_COLOR = "\033[0m"
@@ -214,6 +216,14 @@ def simplify_error_message(error_str: str) -> str:
                 
         return "Apple Music error (see logs for details)"
     
+    # Amazon Music / Shaka Packager
+    if 'shaka packager' in error_lower and 'not found' in error_lower:
+        return (
+            "Shaka Packager executable not found but is required.\n"
+            "Download it at: https://github.com/shaka-project/shaka-packager/releases/latest\n"
+            "Place it in the same folder as orpheus.py (packager-win-x64.exe on Windows)."
+        )
+
     # SoundCloud HLS streaming errors
     if 'soundcloud' in error_lower and ('hls' in error_lower or 'hls_unexpected_error_in_try_block' in error_lower):
         if 'ffmpeg' in error_lower or 'url' in error_lower or 'hls_unexpected_error_in_try_block' in error_lower:
@@ -486,14 +496,20 @@ class Downloader:
             pause_seconds = self._get_spotify_pause_seconds()
             if pause_seconds <= 0:
                 return False
-            jitter = pause_seconds * 0.25
-            pause_actual = random.uniform(pause_seconds - jitter, pause_seconds + jitter)
+            if self._is_spotify_librespot_mode():
+                pause_actual = pause_seconds
+            else:
+                jitter = pause_seconds * 0.25
+                pause_actual = random.uniform(pause_seconds - jitter, pause_seconds + jitter)
             self._sleep_with_countdown(pause_actual, drop_level=1, with_padding=True)
             return True
         return False
 
+    def _countdown_indent_prefix(self, drop_level=1):
+        return ' ' * (self.oprinter.indent_number - drop_level * self.oprinter.multiplier)
+
     def _sleep_with_countdown(self, pause_seconds, drop_level=1, with_padding=False):
-        """Sleep with a 1s countdown log updating the pause sentence."""
+        """Sleep with a 1s countdown log updating the pause sentence on one line (TTY)."""
         try:
             pause_seconds = float(pause_seconds)
         except (TypeError, ValueError):
@@ -504,17 +520,32 @@ class Downloader:
         if with_padding:
             print()
 
+        use_inplace = sys.stdout.isatty() and self.oprinter.printing_enabled
+        indent = self._countdown_indent_prefix(drop_level)
         end_time = time.time() + pause_seconds
         last_remaining = None
+        last_line_len = 0
         while True:
             remaining = int(max(0, end_time - time.time()) + 0.999)
             if remaining <= 0:
                 break
             if remaining != last_remaining:
                 sec_label = "second" if remaining == 1 else "seconds"
-                self.print(f'Pausing {remaining} {sec_label} to prevent rate limiting...', drop_level=drop_level)
+                msg = f'Pausing {remaining} {sec_label} to prevent rate limiting...'
+                if use_inplace:
+                    line = indent + msg
+                    pad = max(0, last_line_len - len(line))
+                    sys.stdout.write('\r' + line + (' ' * pad))
+                    sys.stdout.flush()
+                    last_line_len = len(line)
+                else:
+                    self.print(msg, drop_level=drop_level)
                 last_remaining = remaining
             time.sleep(min(1.0, max(0.05, end_time - time.time())))
+
+        if use_inplace and last_line_len:
+            sys.stdout.write('\r' + (' ' * last_line_len) + '\r')
+            sys.stdout.flush()
 
         if with_padding:
             print()
@@ -701,6 +732,11 @@ class Downloader:
                     track_info = await loop.run_in_executor(None, get_track_info_wrapper)
                     meta_sep = self.global_settings['formatting'].get('metadata_separator', ';')
                     track_name = f"{meta_sep.join(track_info.artists)} - {track_info.name}"
+                    self._apply_track_index_to_tags(
+                        track_info,
+                        args.get('track_index', 0),
+                        args.get('number_of_tracks', 0),
+                    )
                     
                     # Check if file already exists BEFORE getting download info (for temp file modules like Deezer)
                     if track_info:
@@ -1289,18 +1325,26 @@ class Downloader:
 
     @staticmethod
     def _get_artist_initials_from_name(album_info: AlbumInfo) -> str:
-        # Remove "the" from the inital string
-        initial = album_info.artist.lower()
-        if album_info.artist.lower().startswith('the'):
-            initial = initial.replace('the ', '')[0].upper()
+        artist = (album_info.artist or '').strip()
+        if not artist:
+            return '#'
+
+        # Skip leading "The " for sorting initials (e.g. "The Beatles" -> B)
+        initial = artist
+        lower = artist.lower()
+        if lower.startswith('the '):
+            initial = artist[4:].strip()
+        elif lower == 'the':
+            initial = ''
+        if not initial:
+            return '#'
 
         # Unicode fix
-        initial = unicodedata.normalize('NFKD', initial[0]).encode('ascii', 'ignore').decode('utf-8')
+        ch = unicodedata.normalize('NFKD', initial[0]).encode('ascii', 'ignore').decode('utf-8')
+        if not ch:
+            return '#'
 
-        # Make the initial upper if it's alpha
-        initial = initial.upper() if initial.isalpha() else '#'
-
-        return initial
+        return ch.upper() if ch.isalpha() else '#'
 
     @staticmethod
     def _compact_path_tag(value: str, max_len: int = 100) -> str:
@@ -1370,6 +1414,55 @@ class Downloader:
 
         return album_path
 
+    def _compute_disc_track_totals(self, tracks: list) -> dict:
+        """Count tracks per disc when the album track list includes disc metadata."""
+        totals = {}
+        for item in tracks:
+            tags = getattr(item, 'tags', None)
+            disc = getattr(tags, 'disc_number', None) if tags else None
+            if disc:
+                totals[disc] = totals.get(disc, 0) + 1
+        return totals if len(totals) > 1 else {}
+
+    def _apply_track_index_to_tags(self, track_info: TrackInfo, track_index: int, number_of_tracks: int) -> None:
+        """Map download index to tags. Playlists/albums can opt into sequential numbering via settings."""
+        if not track_index:
+            return
+        is_playlist_download = (
+            hasattr(self, 'download_mode') and self.download_mode is DownloadTypeEnum.playlist
+        )
+        use_playlist_position = self.global_settings['formatting'].get('use_playlist_position', False)
+        use_album_position = self.global_settings['formatting'].get('use_album_position', False)
+
+        if is_playlist_download:
+            track_info.tags.playlist_position = track_index
+            if track_info.tags.extra_tags is None:
+                track_info.tags.extra_tags = {}
+            if number_of_tracks:
+                track_info.tags.extra_tags['_playlist_total_tracks'] = number_of_tracks
+            if use_playlist_position:
+                track_info.tags.track_number = track_index
+                if number_of_tracks:
+                    track_info.tags.total_tracks = number_of_tracks
+            return
+
+        if use_album_position:
+            track_info.tags.track_number = track_index
+            if number_of_tracks:
+                track_info.tags.total_tracks = number_of_tracks
+            return
+
+        # Preserve platform-provided per-disc track numbers for album downloads.
+        if not track_info.tags.track_number:
+            track_info.tags.track_number = track_index
+
+        disc_totals = getattr(self, '_current_disc_track_totals', None) or {}
+        disc_number = track_info.tags.disc_number
+        if disc_number and disc_number in disc_totals:
+            track_info.tags.total_tracks = disc_totals[disc_number]
+        elif not track_info.tags.total_tracks and number_of_tracks:
+            track_info.tags.total_tracks = number_of_tracks
+
     def _create_track_location(self, album_location: str, track_info: TrackInfo, override_codec=None) -> str:
         """Create the full file path for a track. Use override_codec (e.g. from download_info.different_codec) for the file extension when the downloaded file is in a different container."""
         # Clean up track tags and add special formats
@@ -1403,10 +1496,25 @@ class Downloader:
         # Add all documented format variables from GUI with default values
         track_tags['track_number'] = str(track_info.tags.track_number) if track_info.tags.track_number else ''
         track_tags['total_tracks'] = str(track_info.tags.total_tracks) if track_info.tags.total_tracks else ''
+        playlist_pos = track_info.tags.playlist_position
+        playlist_pos_str = str(playlist_pos) if playlist_pos else ''
+        if playlist_pos and self.global_settings['formatting']['enable_zfill']:
+            playlist_total = (track_info.tags.extra_tags or {}).get('_playlist_total_tracks')
+            if playlist_total:
+                playlist_pos_str = str(playlist_pos).zfill(len(str(playlist_total)))
+        track_tags['playlist_position'] = playlist_pos_str
         track_tags['disc_number'] = str(track_info.tags.disc_number) if track_info.tags.disc_number else ''
         track_tags['total_discs'] = str(track_info.tags.total_discs) if track_info.tags.total_discs else ''
         track_tags['quality'] = track_info.codec.name if track_info.codec else ''
-        track_tags['artist_initials'] = self._get_artist_initials_from_name(AlbumInfo(name='', artist=track_tags['artist'], tracks=[], release_year=0))
+        # Podcasts/episodes often omit track artists; fall back to show (album_artist/album) for folder sorting.
+        artist_for_initials = (
+            track_tags['artist']
+            or track_tags['album_artist']
+            or track_tags.get('album', '')
+        )
+        track_tags['artist_initials'] = self._get_artist_initials_from_name(
+            AlbumInfo(name='', artist=artist_for_initials, tracks=[], release_year=0)
+        )
         track_tags['name'] = self._compact_path_tag(track_tags.get('name', ''))
 
         # Add aliases for GUI format compatibility (required by default format strings)
@@ -1590,6 +1698,7 @@ class Downloader:
             return []
 
         number_of_tracks = len(album_info.tracks)
+        self._current_disc_track_totals = self._compute_disc_track_totals(album_info.tracks)
 
         path = self.path if not path else path
 
@@ -1885,6 +1994,7 @@ class Downloader:
                 album_info_for_single=album_info
             )
 
+        self._current_disc_track_totals = {}
         return album_info.tracks
 
     def download_artist(self, artist_id, extra_kwargs=None):        
@@ -2299,6 +2409,8 @@ class Downloader:
                 # First get track info
                 track_info = await loop.run_in_executor(None, get_track_info_fallback)
                 
+                self._apply_track_index_to_tags(track_info, track_index, number_of_tracks)
+
                 # Check if file already exists BEFORE getting download info (for temp file modules like Deezer)
                 if track_info:
                     track_location = self._create_track_location(album_location, track_info)
@@ -2316,6 +2428,8 @@ class Downloader:
         # Extract track_id from track_info if not provided
         if track_id is None:
             track_id = track_info.id
+
+        self._apply_track_index_to_tags(track_info, track_index, number_of_tracks)
             
         # Check if track already exists (for backward compatibility) - use thread pool for file checks
         loop = asyncio.get_event_loop()
@@ -2813,9 +2927,8 @@ class Downloader:
 
             d_print(', '.join(codec_info))
 
-        # Add track number to tags if it exists
-        if track_index: track_info.tags.track_number = track_index
-        if number_of_tracks: track_info.tags.total_tracks = number_of_tracks
+        # Playlist index vs album track number (see formatting.use_playlist_position)
+        self._apply_track_index_to_tags(track_info, track_index, number_of_tracks)
 
         # Create track location
         if not album_location:

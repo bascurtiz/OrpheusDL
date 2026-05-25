@@ -54,7 +54,9 @@ class Orpheus:
                 "metadata_separator": ";",
                 "split_metadata": True,
                 "enable_zfill": True,
-                "force_album_format": False
+                "force_album_format": False,
+                "use_playlist_position": False,
+                "use_album_position": False
             },
             "codecs": {
                 "proprietary_codecs": False,
@@ -440,6 +442,46 @@ class Orpheus:
                 merged[section_name] = current_global.get(section_name, section_defaults)
         return merged
 
+def _show_cli_spotify_warning(use_ansi_colors=True):
+    """
+    Shows a suspension warning before downloading with Spotify through the CLI.
+    Includes a 10-second countdown that can be bypassed by pressing Enter, or cancelled via Ctrl+C.
+    """
+    import time
+    import threading
+    import sys
+
+    red_start = "\033[91m\033[1m" if use_ansi_colors else ""
+    yellow_start = "\033[93m\033[1m" if use_ansi_colors else ""
+    color_reset = "\033[0m" if use_ansi_colors else ""
+    print(f"\n{red_start}WARNING: Downloading from Spotify may suspend your account.{color_reset}")
+    print(f"{yellow_start}RECOMMENDED: Only download tracks unavailable elsewhere.{color_reset}\n")
+    print("If your account is suspended, contact support via the email you receive.")
+    print("Within 5 days, you should get a password reset email to regain access.")
+    print("(A 3rd suspension is permanent)\n")
+    print("Press Enter to proceed immediately, or Ctrl+C to cancel.\n")
+
+    stop_event = threading.Event()
+
+    def wait_for_enter():
+        try:
+            sys.stdin.readline()
+        except Exception:
+            pass
+        stop_event.set()
+
+    input_thread = threading.Thread(target=wait_for_enter, daemon=True)
+    input_thread.start()
+
+    for count in range(10, 0, -1):
+        if stop_event.is_set():
+            break
+        print(f"\rContinuing in {count}... ", end="", flush=True)
+        time.sleep(1)
+
+    # Clean up the countdown line in terminal
+    print("\r" + " " * 30 + "\r", end="", flush=True)
+
 
 def orpheus_core_download(orpheus_session: Orpheus, media_to_download, third_party_modules, separate_download_module, output_path, use_ansi_colors=True):
     # Get global settings merged with defaults to ensure all required keys exist
@@ -448,8 +490,15 @@ def orpheus_core_download(orpheus_session: Orpheus, media_to_download, third_par
     downloader.full_settings = orpheus_session.settings  # Add access to full settings including modules
     os.makedirs('temp', exist_ok=True)
 
+    spotify_warning_shown = False
+
     for mainmodule, items in media_to_download.items():
         total_items_in_batch = len(items)
+
+        # Show suspension warning once per CLI run for Spotify download backend
+        if (mainmodule.lower() == 'spotify' or separate_download_module == 'spotify') and not spotify_warning_shown:
+            _show_cli_spotify_warning(use_ansi_colors)
+            spotify_warning_shown = True
         
         for index, media in enumerate(items, start=1):
             if ModuleModes.download not in orpheus_session.module_settings[mainmodule].module_supported_modes:

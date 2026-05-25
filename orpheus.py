@@ -230,6 +230,14 @@ def main():
                         # Fallback (safety): if everything was disabled, revert to searching everything
                         if not modules_to_search:
                             modules_to_search = [m for m in orpheus.module_list if m != 'musixmatch' and ModuleFlags.hidden not in orpheus.module_settings[m].flags]
+                    # Amazon Music requires a logged-in session in loginstorage.bin
+                    if "amazonmusic" in modules_to_search:
+                        try:
+                            from modules.amazonmusic.interface import ModuleInterface
+                            if not ModuleInterface.has_cached_credentials(orpheus.session_storage_location):
+                                modules_to_search = [m for m in modules_to_search if m != "amazonmusic"]
+                        except Exception:
+                            modules_to_search = [m for m in modules_to_search if m != "amazonmusic"]
                 elif modulename_input in orpheus.module_list:
                     modules_to_search = [modulename_input]
                 else:
@@ -277,15 +285,31 @@ def main():
                             global_index += 1
                             
                     except Exception as e:
+                        err_str = str(e)
+                        err_lower = err_str.lower()
                         if modulename_input == 'all':
-                            err_str = str(e)
-                            err_lower = err_str.lower()
                             if "user authentication is required" in err_lower or '"code":401' in err_str.replace(" ", ""):
                                 print(f"Error searching {modulename}: Authentication required (token invalid or expired).")
+                            elif err_str.startswith("Amazon Music:") or "amazon music:" in err_lower:
+                                print(f"Error searching {modulename}: {err_str}")
+                            elif isinstance(e, PermissionError) and modulename == 'amazonmusic':
+                                print(
+                                    f"Error searching {modulename}: Widevine device file (.wvd) missing or invalid. "
+                                    "Set wvd_path in settings."
+                                )
                             else:
                                 print(f"Error searching {modulename}: {err_str}")
                             continue
                         else:
+                            if err_str.startswith("Amazon Music:") or "amazon music:" in err_lower:
+                                print(f'\n{err_str}')
+                                exit(1)
+                            if isinstance(e, PermissionError) and modulename == 'amazonmusic':
+                                print(
+                                    "\nAmazon Music: Widevine device file (.wvd) missing or invalid.\n"
+                                    "Set wvd_path in settings (modules → amazonmusic)."
+                                )
+                                exit(1)
                             raise e
 
                 if global_index == 1:
@@ -413,6 +437,9 @@ def main():
                         if service_name == 'applemusic':
                             if args.song_codec: extra_kwargs['song_codec'] = args.song_codec
                             if args.use_wrapper: extra_kwargs['use_wrapper'] = args.use_wrapper
+                        if service_name == 'spotify' and 'episode' in components:
+                            extra_kwargs['is_episode'] = True
+                            extra_kwargs['spotify_media_type'] = 'episode'
 
                         media_to_download[service_name].append(MediaIdentification(media_type=type_matches[-1], media_id=components[-1], extra_kwargs=extra_kwargs))
                 else:
@@ -490,6 +517,19 @@ if __name__ == "__main__":
         # User-facing guidance (e.g. no modules installed): show message only, no traceback
         if err_str and "No modules are installed" in err_str:
             print(f'\n{e}')
+            exit(1)
+        if err_str and (
+            err_str.startswith("Amazon Music:")
+            or "amazon music:" in err_lower
+            or "shaka packager executable not found" in err_lower
+        ):
+            print(f'\n{e}')
+            exit(1)
+        if isinstance(e, PermissionError) and "wvd" in err_lower:
+            print(
+                "\nAmazon Music: Could not read the Widevine device file (.wvd).\n"
+                "Check wvd_path in settings (modules → amazonmusic) and ensure the path points to a .wvd file, not a folder."
+            )
             exit(1)
         # Catch-all for other exceptions
         import traceback
