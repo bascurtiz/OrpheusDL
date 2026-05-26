@@ -72,48 +72,28 @@ def setup_ffmpeg_path():
     """Setup FFmpeg path from settings.json to match GUI behavior.
     Also ensures common system paths (Homebrew, etc.) are checked."""
     try:
-        current_path = os.environ.get("PATH", "")
-        ffmpeg_dir_added = None
+        from utils.utils import locate_ffmpeg
 
-        # 1. Try to load custom FFmpeg path from settings.json
+        current_path = os.environ.get("PATH", "")
+        ffmpeg_path_setting = "ffmpeg"
         settings_path = os.path.join("config", "settings.json")
         if os.path.exists(settings_path):
             with open(settings_path, 'r', encoding='utf-8') as f:
                 settings = json.load(f)
-
             ffmpeg_path_setting = (
                 settings.get("global", {}).get("advanced", {}).get("ffmpeg_path")
                 or settings.get("globals", {}).get("advanced", {}).get("ffmpeg_path", "ffmpeg")
             )
-            
-            if isinstance(ffmpeg_path_setting, str) and ffmpeg_path_setting.strip() and ffmpeg_path_setting.lower() != "ffmpeg":
-                candidate = ffmpeg_path_setting.strip()
-                if os.path.isfile(candidate):
-                    ffmpeg_dir_added = os.path.dirname(candidate)
-                elif os.path.isdir(candidate):
-                    ffmpeg_dir_added = candidate
 
-        # 2. If no custom path set, look for local ffmpeg in project root or script dir
-        if ffmpeg_dir_added is None:
-            ffmpeg_name = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
-            search_dirs = [
-                os.getcwd(),
-                os.path.dirname(os.path.abspath(__file__)),
-            ]
-            for dir_path in search_dirs:
-                if os.path.isfile(os.path.join(dir_path, ffmpeg_name)):
-                    ffmpeg_dir_added = dir_path
-                    break
-
-        # 3. Use the robust system finder from utils (covers Homebrew, etc.)
-        if ffmpeg_dir_added is None:
-            found, system_ffmpeg = find_system_ffmpeg()
-            if found:
-                ffmpeg_dir_added = os.path.dirname(system_ffmpeg)
-
-        # Apply to PATH if a directory was found
-        if ffmpeg_dir_added and ffmpeg_dir_added not in current_path.split(os.pathsep):
-            os.environ["PATH"] = ffmpeg_dir_added + os.pathsep + current_path
+        search_dirs = [
+            os.getcwd(),
+            os.path.dirname(os.path.abspath(__file__)),
+        ]
+        resolved = locate_ffmpeg(ffmpeg_path_setting, extra_search_dirs=search_dirs)
+        if resolved:
+            ffmpeg_dir_added = os.path.dirname(resolved)
+            if ffmpeg_dir_added and ffmpeg_dir_added not in current_path.split(os.pathsep):
+                os.environ["PATH"] = ffmpeg_dir_added + os.pathsep + current_path
     except Exception as e:
         print(f"Warning: Could not setup FFmpeg path: {e}")
 

@@ -502,6 +502,12 @@ _SHAKA_PACKAGER_DOWNLOAD = {
     'Linux': 'packager-linux-x64',
 }
 
+_MP4DECRYPT_NAMES = {
+    'Windows': ('mp4decrypt.exe',),
+    'Darwin': ('mp4decrypt',),
+    'Linux': ('mp4decrypt',),
+}
+
 
 def _shaka_packager_version_output(executable) -> str:
     """Return combined stdout/stderr from `packager -version` / `--version`."""
@@ -626,6 +632,32 @@ def resolve_shaka_packager():
     return None
 
 
+def resolve_mp4decrypt():
+    """Return path to Bento4 mp4decrypt (optional Amazon Music fallback), or None."""
+    import platform as _platform
+    import shutil
+    from pathlib import Path
+
+    names = _MP4DECRYPT_NAMES.get(_platform.system())
+    if not names:
+        return None
+
+    for root in _shaka_packager_search_roots():
+        for name in names:
+            candidate = Path(root) / name
+            if candidate.is_file() and candidate.stat().st_size > 0:
+                return candidate.resolve()
+
+    env = get_clean_env()
+    for name in names:
+        found = shutil.which(name, path=env.get('PATH'))
+        if found:
+            path = Path(found)
+            if path.is_file() and path.stat().st_size > 0:
+                return path.resolve()
+    return None
+
+
 def ensure_shaka_packager_in_data_dir(data_dir: str) -> str | None:
     """
     Copy bundled Shaka Packager into the writable data directory (frozen builds).
@@ -731,3 +763,72 @@ def find_system_ffmpeg():
     
     _ffmpeg_cache = (False, None)
     return _ffmpeg_cache
+
+
+def is_missing_executable_error(error_str) -> bool:
+    """True when subprocess failed because an executable path could not be resolved (e.g. missing ffmpeg)."""
+    if not error_str:
+        return False
+    el = str(error_str).lower()
+    return (
+        'winerror 2' in el
+        or 'errno 2' in el
+        or 'cannot find the file specified' in el
+        or 'no such file or directory' in el
+        or 'het systeem kan het opgegeven bestand niet vinden' in el
+    )
+
+
+def locate_ffmpeg(preferred_path=None, extra_search_dirs=None):
+    """
+    Resolve the ffmpeg executable. Checks the configured path, app/bundle dirs, then system PATH.
+    Returns an absolute path string, or None if not found.
+    """
+    import platform
+    import sys
+
+    system = platform.system()
+    ffmpeg_name = 'ffmpeg.exe' if system == 'Windows' else 'ffmpeg'
+    extra_search_dirs = extra_search_dirs or []
+
+    def _is_valid(path):
+        return bool(path) and os.path.isfile(path)
+
+    if isinstance(preferred_path, str):
+        candidate = preferred_path.strip()
+        if candidate and candidate.lower() != 'ffmpeg' and _is_valid(candidate):
+            return os.path.abspath(candidate)
+
+    search_paths = []
+    for directory in extra_search_dirs:
+        if directory:
+            search_paths.append(os.path.join(directory, ffmpeg_name))
+
+    try:
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        search_paths.append(os.path.join(project_root, ffmpeg_name))
+    except Exception:
+        pass
+
+    search_paths.append(os.path.join(os.getcwd(), ffmpeg_name))
+
+    if hasattr(sys, '_MEIPASS'):
+        search_paths.append(os.path.join(sys._MEIPASS, ffmpeg_name))
+
+    if getattr(sys, 'frozen', False):
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+        search_paths.insert(0, os.path.join(exe_dir, ffmpeg_name))
+
+    seen = set()
+    for path in search_paths:
+        norm = os.path.normcase(os.path.abspath(path)) if os.path.isabs(path) or path else path
+        if norm in seen:
+            continue
+        seen.add(norm)
+        if _is_valid(path):
+            return os.path.abspath(path)
+
+    found, system_path = find_system_ffmpeg()
+    if found and system_path:
+        return system_path
+    return None

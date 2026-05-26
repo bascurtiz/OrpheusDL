@@ -216,6 +216,14 @@ def simplify_error_message(error_str: str) -> str:
                 
         return "Apple Music error (see logs for details)"
     
+    # Missing executable (typically ffmpeg when settings point at a stale path)
+    if is_missing_executable_error(error_str):
+        if 'shaka' not in error_lower and 'packager' not in error_lower:
+            return (
+                "FFmpeg not found or misconfigured (required for this download). "
+                "Install FFmpeg or set Settings > Global > Advanced > FFmpeg Path."
+            )
+
     # Amazon Music / Shaka Packager
     if 'shaka packager' in error_lower and 'not found' in error_lower:
         return (
@@ -226,9 +234,9 @@ def simplify_error_message(error_str: str) -> str:
     if '3221225477' in error_str or '-1073741819' in error_str or 'access violation' in error_lower:
         if 'packager' in error_lower or 'shaka' in error_lower or 'key=' in error_lower:
             return (
-                "Shaka Packager crashed while decrypting (Windows access violation).\n"
-                "Install Microsoft Visual C++ 2015–2022 Redistributable (x64), ensure "
-                "packager-win-x64.exe is next to the app, then retry."
+                "Shaka Packager crashed while decrypting (exit 3221225477).\n"
+                "Add mp4decrypt.exe from Bento4 next to the app (see bento4.com/downloads), "
+                "or use a full Windows 10 install instead of Tiny10."
             )
 
     # SoundCloud HLS streaming errors
