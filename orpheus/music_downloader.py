@@ -2395,7 +2395,7 @@ class Downloader:
 
         # Call get_artist_info based on service-specific signature requirements
         try:
-            if service_name_lower in ['deezer', 'qobuz', 'soundcloud', 'tidal', 'beatport', 'beatsource']:
+            if service_name_lower in ['deezer', 'qobuz', 'soundcloud', 'tidal', 'beatport', 'beatsource', 'amazonmusic']:
                 # These services require 'get_credited_albums' (the boolean value) as the second positional argument.            
                 artist_info: ArtistInfo = self.service.get_artist_info(artist_id, fetch_credited_albums_value, **prepared_kwargs)
             elif service_name_lower == 'spotify':
