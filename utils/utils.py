@@ -1,6 +1,7 @@
 import pickle, requests, errno, hashlib, math, os, re, operator, asyncio
 import aiohttp
 import aiofiles
+from urllib.parse import urlparse, urlunparse
 from tqdm import tqdm as original_tqdm
 import threading
 
@@ -450,6 +451,7 @@ def get_clean_env():
     """Get a clean environment for subprocesses to avoid PyInstaller library conflicts."""
     import os
     import sys
+    import platform as _platform
     env = os.environ.copy()
     
     # Only strip library paths if we are in a frozen (PyInstaller) environment
@@ -465,8 +467,226 @@ def get_clean_env():
             env['LD_LIBRARY_PATH'] = env['LD_LIBRARY_PATH_ORIG']
         if has_orig_dyld:
             env['DYLD_LIBRARY_PATH'] = env['DYLD_LIBRARY_PATH_ORIG']
+
+    # Windows: PyInstaller onefile extracts DLLs under _MEIPASS on PATH. Native tools
+    # (Shaka Packager, ffmpeg) can load the wrong DLLs and crash (exit 0xC0000005).
+    if is_frozen and _platform.system() == 'Windows':
+        meipass = getattr(sys, '_MEIPASS', None)
+        if meipass:
+            meipass_norm = os.path.normcase(os.path.abspath(meipass))
+            cleaned_path = []
+            for entry in env.get('PATH', '').split(os.pathsep):
+                if not entry:
+                    continue
+                try:
+                    entry_norm = os.path.normcase(os.path.abspath(entry))
+                except OSError:
+                    cleaned_path.append(entry)
+                    continue
+                if entry_norm == meipass_norm or entry_norm.startswith(meipass_norm + os.sep):
+                    continue
+                cleaned_path.append(entry)
+            env['PATH'] = os.pathsep.join(cleaned_path)
     
     return env
+
+
+_SHAKA_PACKAGER_NAMES = {
+    'Windows': ('packager-win-x64.exe', 'packager-win.exe', 'shaka-packager.exe'),
+    'Darwin': ('packager-osx-x64', 'packager-osx', 'shaka-packager'),
+    'Linux': ('packager-linux-x64', 'packager-linux', 'shaka-packager'),
+}
+
+_SHAKA_PACKAGER_DOWNLOAD = {
+    'Windows': 'packager-win-x64.exe',
+    'Darwin': 'packager-osx-x64',
+    'Linux': 'packager-linux-x64',
+}
+
+_MP4DECRYPT_NAMES = {
+    'Windows': ('mp4decrypt.exe',),
+    'Darwin': ('mp4decrypt',),
+    'Linux': ('mp4decrypt',),
+}
+
+
+def _shaka_packager_version_output(executable) -> str:
+    """Return combined stdout/stderr from `packager -version` / `--version`."""
+    import subprocess
+    import platform as _platform
+    from pathlib import Path
+
+    path = Path(executable)
+    if not path.is_file():
+        return ''
+    run_kwargs = {
+        'args': [str(path), '-version'],
+        'capture_output': True,
+        'text': True,
+        'timeout': 15,
+        'env': get_clean_env(),
+    }
+    if _platform.system() == 'Windows':
+        run_kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
+    try:
+        result = subprocess.run(**run_kwargs)
+    except Exception:
+        try:
+            run_kwargs['args'] = [str(path), '--version']
+            result = subprocess.run(**run_kwargs)
+        except Exception:
+            return ''
+    return f"{result.stdout or ''}{result.stderr or ''}".strip()
+
+
+def ensure_shaka_packager_binary(search_root=None):
+    """Download Shaka Packager (latest) only when missing under search_root. Never replaces an existing binary."""
+    import platform as _platform
+    import urllib.request
+    import stat
+    from pathlib import Path
+
+    system = _platform.system()
+    filename = _SHAKA_PACKAGER_DOWNLOAD.get(system)
+    if not filename:
+        return None
+
+    if search_root is None:
+        roots = _shaka_packager_search_roots()
+        root = Path(roots[0]) if roots else Path.cwd()
+    else:
+        root = Path(search_root)
+
+    dest = (root / filename).resolve()
+    if dest.is_file() and dest.stat().st_size > 0:
+        return dest
+
+    url = f'https://github.com/shaka-project/shaka-packager/releases/latest/download/{filename}'
+    try:
+        print(f'[Shaka] Downloading {filename} (latest release)...')
+        urllib.request.urlretrieve(url, dest)
+        if system != 'Windows':
+            dest.chmod(dest.stat().st_mode | stat.S_IEXEC)
+        version_text = _shaka_packager_version_output(dest)
+        if version_text:
+            print(f'[Shaka] {version_text}')
+        return dest.resolve() if dest.is_file() else None
+    except Exception as exc:
+        print(f'[Shaka] WARNING: Could not download Shaka Packager: {exc}')
+        return resolve_shaka_packager()
+
+
+def _shaka_packager_search_roots():
+    """Directories to search for the Shaka Packager binary (app root, bundle, cwd)."""
+    import sys
+    roots = []
+    seen = set()
+
+    def _add(path):
+        if not path:
+            return
+        try:
+            key = os.path.normcase(os.path.abspath(path))
+        except OSError:
+            return
+        if key not in seen and os.path.isdir(path):
+            seen.add(key)
+            roots.append(path)
+
+    if getattr(sys, 'frozen', False):
+        _add(os.path.dirname(os.path.abspath(sys.executable)))
+        meipass = getattr(sys, '_MEIPASS', None)
+        if meipass:
+            _add(meipass)
+    else:
+        try:
+            _add(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        except OSError:
+            pass
+    _add(os.getcwd())
+    return roots
+
+
+def resolve_shaka_packager():
+    """Return absolute path to Shaka Packager, or None if not found."""
+    import platform as _platform
+    import shutil
+    from pathlib import Path
+
+    names = _SHAKA_PACKAGER_NAMES.get(_platform.system())
+    if not names:
+        return None
+
+    for root in _shaka_packager_search_roots():
+        for name in names:
+            candidate = Path(root) / name
+            if candidate.is_file() and candidate.stat().st_size > 0:
+                return candidate.resolve()
+
+    env = get_clean_env()
+    for name in names:
+        found = shutil.which(name, path=env.get('PATH'))
+        if found:
+            path = Path(found)
+            if path.is_file() and path.stat().st_size > 0:
+                return path.resolve()
+    return None
+
+
+def resolve_mp4decrypt():
+    """Return path to Bento4 mp4decrypt (optional Amazon Music fallback), or None."""
+    import platform as _platform
+    import shutil
+    from pathlib import Path
+
+    names = _MP4DECRYPT_NAMES.get(_platform.system())
+    if not names:
+        return None
+
+    for root in _shaka_packager_search_roots():
+        for name in names:
+            candidate = Path(root) / name
+            if candidate.is_file() and candidate.stat().st_size > 0:
+                return candidate.resolve()
+
+    env = get_clean_env()
+    for name in names:
+        found = shutil.which(name, path=env.get('PATH'))
+        if found:
+            path = Path(found)
+            if path.is_file() and path.stat().st_size > 0:
+                return path.resolve()
+    return None
+
+
+def ensure_shaka_packager_in_data_dir(data_dir: str) -> str | None:
+    """
+    Copy bundled Shaka Packager into the writable data directory (frozen builds).
+    Returns the packager path if available.
+    """
+    import shutil
+    import platform as _platform
+
+    resolved = resolve_shaka_packager()
+    if not resolved:
+        return None
+
+    if not data_dir:
+        return str(resolved)
+
+    names = _SHAKA_PACKAGER_NAMES.get(_platform.system(), ())
+    dest_name = names[0] if names else resolved.name
+    dest = os.path.join(data_dir, dest_name)
+    src = str(resolved)
+
+    try:
+        if os.path.normcase(os.path.abspath(src)) == os.path.normcase(os.path.abspath(dest)):
+            return dest
+        if not os.path.isfile(dest) or os.path.getsize(dest) < os.path.getsize(src):
+            shutil.copy2(src, dest)
+    except OSError:
+        return src
+    return dest
 
 _ffmpeg_cache = None
 
@@ -544,3 +764,113 @@ def find_system_ffmpeg():
     
     _ffmpeg_cache = (False, None)
     return _ffmpeg_cache
+
+
+def is_missing_executable_error(error_str) -> bool:
+    """True when subprocess failed because an executable path could not be resolved (e.g. missing ffmpeg)."""
+    if not error_str:
+        return False
+    el = str(error_str).lower()
+    return (
+        'winerror 2' in el
+        or 'errno 2' in el
+        or 'cannot find the file specified' in el
+        or 'no such file or directory' in el
+        or 'het systeem kan het opgegeven bestand niet vinden' in el
+    )
+
+
+def locate_ffmpeg(preferred_path=None, extra_search_dirs=None):
+    """
+    Resolve the ffmpeg executable. Checks the configured path, app/bundle dirs, then system PATH.
+    Returns an absolute path string, or None if not found.
+    """
+    import platform
+    import sys
+
+    system = platform.system()
+    ffmpeg_name = 'ffmpeg.exe' if system == 'Windows' else 'ffmpeg'
+    extra_search_dirs = extra_search_dirs or []
+
+    def _is_valid(path):
+        return bool(path) and os.path.isfile(path)
+
+    if isinstance(preferred_path, str):
+        candidate = preferred_path.strip()
+        if candidate and candidate.lower() != 'ffmpeg' and _is_valid(candidate):
+            return os.path.abspath(candidate)
+
+    search_paths = []
+    for directory in extra_search_dirs:
+        if directory:
+            search_paths.append(os.path.join(directory, ffmpeg_name))
+
+    try:
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        search_paths.append(os.path.join(project_root, ffmpeg_name))
+    except Exception:
+        pass
+
+    search_paths.append(os.path.join(os.getcwd(), ffmpeg_name))
+
+    if hasattr(sys, '_MEIPASS'):
+        search_paths.append(os.path.join(sys._MEIPASS, ffmpeg_name))
+
+    if getattr(sys, 'frozen', False):
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+        search_paths.insert(0, os.path.join(exe_dir, ffmpeg_name))
+
+    seen = set()
+    for path in search_paths:
+        norm = os.path.normcase(os.path.abspath(path)) if os.path.isabs(path) or path else path
+        if norm in seen:
+            continue
+        seen.add(norm)
+        if _is_valid(path):
+            return os.path.abspath(path)
+
+    found, system_path = find_system_ffmpeg()
+    if found and system_path:
+        return system_path
+    return None
+
+
+def resolve_deezer_share_url(url: str) -> str:
+    """Expand link.deezer.com share URLs to a canonical www.deezer.com URL."""
+    if not url or not isinstance(url, str):
+        return url
+    stripped = url.strip()
+    try:
+        parsed = urlparse(stripped)
+    except Exception:
+        return url
+    host = (parsed.netloc or '').lower()
+    if host not in ('link.deezer.com', 'www.link.deezer.com'):
+        return url
+    if parsed.scheme not in ('http', 'https'):
+        return url
+    try:
+        session = create_requests_session()
+        response = session.head(stripped, allow_redirects=True, timeout=15)
+        if response.status_code >= 400:
+            response = session.get(stripped, allow_redirects=True, timeout=15)
+        response.raise_for_status()
+        final_parsed = urlparse(response.url)
+        final_host = (final_parsed.netloc or '').lower()
+        if 'deezer.com' not in final_host or final_host == 'link.deezer.com':
+            return url
+        # Drop tracking query params; keep locale + path (e.g. /en/playlist/123).
+        return urlunparse((
+            final_parsed.scheme or 'https',
+            final_parsed.netloc,
+            final_parsed.path.rstrip('/') or '/',
+            '', '', '',
+        ))
+    except Exception:
+        return url
+
+
+def resolve_platform_share_url(url: str) -> str:
+    """Resolve known platform short/share links to downloadable canonical URLs."""
+    resolved = resolve_deezer_share_url(url)
+    return resolved if resolved != url else url

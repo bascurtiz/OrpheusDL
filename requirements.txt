@@ -30,3 +30,11 @@ flask
 websocket-client>=1.8.0
 zeroconf>=0.146.4
 pyogg>=0.6.14a.1
+# Amazon Music (modules/amazonmusic — azapi.py, audible login flow)
+audible>=0.8.2
+beautifulsoup4>=4.12.2
+rsa>=4.9
+natsort>=8.4.0
+xmltodict>=0.13.0
+python-dateutil>=2.8.0
+brotli>=1.0.0

@@ -61,52 +61,39 @@ except ModuleNotFoundError:
     SpotifyConfigError = None  # type: ignore
     SpotifyRateLimitDetectedError = None  # type: ignore
 
+try:
+    from modules.amazonmusic.interface import AmazonMusicConfigError
+except ModuleNotFoundError:
+    AmazonMusicConfigError = None  # type: ignore
+
+from utils.module_settings import format_module_config_error
+
 def setup_ffmpeg_path():
     """Setup FFmpeg path from settings.json to match GUI behavior.
     Also ensures common system paths (Homebrew, etc.) are checked."""
     try:
-        current_path = os.environ.get("PATH", "")
-        ffmpeg_dir_added = None
+        from utils.utils import locate_ffmpeg
 
-        # 1. Try to load custom FFmpeg path from settings.json
+        current_path = os.environ.get("PATH", "")
+        ffmpeg_path_setting = "ffmpeg"
         settings_path = os.path.join("config", "settings.json")
         if os.path.exists(settings_path):
             with open(settings_path, 'r', encoding='utf-8') as f:
                 settings = json.load(f)
-
             ffmpeg_path_setting = (
                 settings.get("global", {}).get("advanced", {}).get("ffmpeg_path")
                 or settings.get("globals", {}).get("advanced", {}).get("ffmpeg_path", "ffmpeg")
             )
-            
-            if isinstance(ffmpeg_path_setting, str) and ffmpeg_path_setting.strip() and ffmpeg_path_setting.lower() != "ffmpeg":
-                candidate = ffmpeg_path_setting.strip()
-                if os.path.isfile(candidate):
-                    ffmpeg_dir_added = os.path.dirname(candidate)
-                elif os.path.isdir(candidate):
-                    ffmpeg_dir_added = candidate
 
-        # 2. If no custom path set, look for local ffmpeg in project root or script dir
-        if ffmpeg_dir_added is None:
-            ffmpeg_name = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
-            search_dirs = [
-                os.getcwd(),
-                os.path.dirname(os.path.abspath(__file__)),
-            ]
-            for dir_path in search_dirs:
-                if os.path.isfile(os.path.join(dir_path, ffmpeg_name)):
-                    ffmpeg_dir_added = dir_path
-                    break
-
-        # 3. Use the robust system finder from utils (covers Homebrew, etc.)
-        if ffmpeg_dir_added is None:
-            found, system_ffmpeg = find_system_ffmpeg()
-            if found:
-                ffmpeg_dir_added = os.path.dirname(system_ffmpeg)
-
-        # Apply to PATH if a directory was found
-        if ffmpeg_dir_added and ffmpeg_dir_added not in current_path.split(os.pathsep):
-            os.environ["PATH"] = ffmpeg_dir_added + os.pathsep + current_path
+        search_dirs = [
+            os.getcwd(),
+            os.path.dirname(os.path.abspath(__file__)),
+        ]
+        resolved = locate_ffmpeg(ffmpeg_path_setting, extra_search_dirs=search_dirs)
+        if resolved:
+            ffmpeg_dir_added = os.path.dirname(resolved)
+            if ffmpeg_dir_added and ffmpeg_dir_added not in current_path.split(os.pathsep):
+                os.environ["PATH"] = ffmpeg_dir_added + os.pathsep + current_path
     except Exception as e:
         print(f"Warning: Could not setup FFmpeg path: {e}")
 
@@ -230,6 +217,14 @@ def main():
                         # Fallback (safety): if everything was disabled, revert to searching everything
                         if not modules_to_search:
                             modules_to_search = [m for m in orpheus.module_list if m != 'musixmatch' and ModuleFlags.hidden not in orpheus.module_settings[m].flags]
+                    # Amazon Music requires a logged-in session in loginstorage.bin
+                    if "amazonmusic" in modules_to_search:
+                        try:
+                            from modules.amazonmusic.interface import ModuleInterface
+                            if not ModuleInterface.has_cached_credentials(orpheus.session_storage_location):
+                                modules_to_search = [m for m in modules_to_search if m != "amazonmusic"]
+                        except Exception:
+                            modules_to_search = [m for m in modules_to_search if m != "amazonmusic"]
                 elif modulename_input in orpheus.module_list:
                     modules_to_search = [modulename_input]
                 else:
@@ -277,15 +272,40 @@ def main():
                             global_index += 1
                             
                     except Exception as e:
+                        err_str = format_module_config_error(modulename, e)
+                        err_lower = err_str.lower()
                         if modulename_input == 'all':
-                            err_str = str(e)
-                            err_lower = err_str.lower()
                             if "user authentication is required" in err_lower or '"code":401' in err_str.replace(" ", ""):
                                 print(f"Error searching {modulename}: Authentication required (token invalid or expired).")
+                            elif (
+                                err_str.startswith("Amazon Music:")
+                                or "amazon music:" in err_lower
+                                or "amazon music is not set up" in err_lower
+                            ):
+                                print(f"Error searching {modulename}: {err_str}")
+                            elif isinstance(e, PermissionError) and modulename == 'amazonmusic':
+                                print(
+                                    f"Error searching {modulename}: Widevine device file (.wvd) missing or invalid. "
+                                    "Set wvd_path in settings (modules → amazonmusic)."
+                                )
                             else:
                                 print(f"Error searching {modulename}: {err_str}")
                             continue
                         else:
+                            if (
+                                err_str.startswith("Amazon Music:")
+                                or "amazon music:" in err_lower
+                                or "amazon music is not set up" in err_lower
+                                or (AmazonMusicConfigError is not None and isinstance(e, AmazonMusicConfigError))
+                            ):
+                                print(f'\n{err_str}')
+                                exit(1)
+                            if isinstance(e, PermissionError) and modulename == 'amazonmusic':
+                                print(
+                                    "\nAmazon Music: Widevine device file (.wvd) missing or invalid.\n"
+                                    "Set wvd_path in settings (modules → amazonmusic)."
+                                )
+                                exit(1)
                             raise e
 
                 if global_index == 1:
@@ -358,6 +378,14 @@ def main():
                     continue
 
                 if link.startswith('http'):
+                    try:
+                        from utils.utils import resolve_platform_share_url
+                        expanded = resolve_platform_share_url(link)
+                        if expanded and expanded != link:
+                            print(f'Expanded share link to: {expanded}')
+                            link = expanded
+                    except Exception:
+                        pass
                     url = urlparse(link)
                     components = url.path.split('/')
 
@@ -413,6 +441,9 @@ def main():
                         if service_name == 'applemusic':
                             if args.song_codec: extra_kwargs['song_codec'] = args.song_codec
                             if args.use_wrapper: extra_kwargs['use_wrapper'] = args.use_wrapper
+                        if service_name == 'spotify' and 'episode' in components:
+                            extra_kwargs['is_episode'] = True
+                            extra_kwargs['spotify_media_type'] = 'episode'
 
                         media_to_download[service_name].append(MediaIdentification(media_type=type_matches[-1], media_id=components[-1], extra_kwargs=extra_kwargs))
                 else:
@@ -462,6 +493,9 @@ if __name__ == "__main__":
         print('\n\t^C pressed - abort')
         exit()
     except Exception as e:
+        if AmazonMusicConfigError is not None and isinstance(e, AmazonMusicConfigError):
+            print(f'\n{e}')
+            exit(1)
         if SpotifyConfigError is not None and isinstance(e, SpotifyConfigError):
             print(f'\n{e}')
             exit(1)
@@ -490,6 +524,24 @@ if __name__ == "__main__":
         # User-facing guidance (e.g. no modules installed): show message only, no traceback
         if err_str and "No modules are installed" in err_str:
             print(f'\n{e}')
+            exit(1)
+        friendly = format_module_config_error("", e) if err_str else ""
+        if friendly and friendly != err_str:
+            print(f'\n{friendly}')
+            exit(1)
+        if err_str and (
+            err_str.startswith("Amazon Music:")
+            or "amazon music:" in err_lower
+            or "amazon music is not set up" in err_lower
+            or "shaka packager executable not found" in err_lower
+        ):
+            print(f'\n{e}')
+            exit(1)
+        if isinstance(e, PermissionError) and "wvd" in err_lower:
+            print(
+                "\nAmazon Music: Could not read the Widevine device file (.wvd).\n"
+                "Check wvd_path in settings (modules → amazonmusic) and ensure the path points to a .wvd file, not a folder."
+            )
             exit(1)
         # Catch-all for other exceptions
         import traceback

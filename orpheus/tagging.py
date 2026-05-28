@@ -330,7 +330,12 @@ def tag_file(file_path: str, image_path: str, track_info: TrackInfo, credits_lis
     # add all extra_kwargs key value pairs to the (FLAC, Vorbis) file
     if container in {ContainerEnum.flac, ContainerEnum.ogg, ContainerEnum.opus, ContainerEnum.webm}:
         for key, value in track_info.tags.extra_tags.items():
-            tagger[key] = value
+            # Mutagen VorbisComment/FLAC expects string values; some callers inject ints.
+            # Normalize here to avoid tagger.save() crashing.
+            if isinstance(value, (list, tuple, set)):
+                tagger[key] = [str(v) for v in value]
+            else:
+                tagger[key] = str(value)
     elif container == ContainerEnum.m4a or container == ContainerEnum.mp4:
         for key, value in track_info.tags.extra_tags.items():
             tagger['----:com.apple.itunes:' + key] = [str(value).encode()]

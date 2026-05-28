@@ -1,4 +1,5 @@
 import logging, os
+import sys
 import shutil
 import unicodedata
 from dataclasses import asdict
@@ -28,6 +29,11 @@ from orpheus.tagging import tag_file
 from utils.models import *
 from utils.utils import *
 from utils.exceptions import *
+from utils.download_errors import (
+    catalog_summary_url,
+    merge_album_exclusions,
+    platform_track_url,
+)
 
 # --- Modular Spotify Import ---
 try:
@@ -53,7 +59,8 @@ PLATFORM_COLORS = {
     "idagio": "\033[35m",        # Magenta (#5C34FE -> magenta)
     "bugs": "\033[31m",          # Red (#FF3B28 -> red)
     "nugs": "\033[31m",          # Red (#C83B30 -> red)
-    "youtube": "\033[91m"        # Bright Red (YouTube Brand Color)
+    "youtube": "\033[91m",       # Bright Red (YouTube Brand Color)
+    "amazon music": "\033[38;2;37;209;218m",  # Amazon Music brand (#25D1DA)
 }
 
 RESET_COLOR = "\033[0m"
@@ -214,6 +221,29 @@ def simplify_error_message(error_str: str) -> str:
                 
         return "Apple Music error (see logs for details)"
     
+    # Missing executable (typically ffmpeg when settings point at a stale path)
+    if is_missing_executable_error(error_str):
+        if 'shaka' not in error_lower and 'packager' not in error_lower:
+            return (
+                "FFmpeg not found or misconfigured (required for this download). "
+                "Install FFmpeg or set Settings > Global > Advanced > FFmpeg Path."
+            )
+
+    # Amazon Music / Shaka Packager
+    if 'shaka packager' in error_lower and 'not found' in error_lower:
+        return (
+            "Shaka Packager executable not found but is required.\n"
+            "Download it at: https://github.com/shaka-project/shaka-packager/releases/latest\n"
+            "Place it in the same folder as orpheus.py (packager-win-x64.exe on Windows)."
+        )
+    if '3221225477' in error_str or '-1073741819' in error_str or 'access violation' in error_lower:
+        if 'packager' in error_lower or 'shaka' in error_lower or 'key=' in error_lower:
+            return (
+                "Shaka Packager crashed while decrypting (exit 3221225477).\n"
+                "Add mp4decrypt.exe from Bento4 next to the app (see bento4.com/downloads), "
+                "or use a full Windows 10 install instead of Tiny10."
+            )
+
     # SoundCloud HLS streaming errors
     if 'soundcloud' in error_lower and ('hls' in error_lower or 'hls_unexpected_error_in_try_block' in error_lower):
         if 'ffmpeg' in error_lower or 'url' in error_lower or 'hls_unexpected_error_in_try_block' in error_lower:
@@ -294,6 +324,289 @@ class Downloader:
         self.albums_with_failed_tracks = []
 
         self.total_download_time: float = 0
+        self._download_error_log_path = None
+        self._download_error_log_context = None
+        self._download_error_count = 0
+
+    def _normalize_error_log_dir(self, output_dir: str) -> str:
+        if not output_dir:
+            output_dir = self.path or '.'
+        output_dir = output_dir.replace('\\', '/')
+        if not output_dir.endswith('/'):
+            output_dir += '/'
+        return output_dir
+
+    def _init_download_error_log(self, output_dir: str, context_type: str, context_name: str, context_id: str):
+        """Create/overwrite error.txt for a new album, playlist, or similar batch."""
+        output_dir = self._normalize_error_log_dir(output_dir)
+        self._download_error_log_path = os.path.join(output_dir, 'error.txt')
+        self._download_error_log_context = {
+            'type': context_type,
+            'name': context_name or '',
+            'id': context_id or '',
+            'service': self.service_name or '',
+        }
+        self._download_error_count = 0
+        header = self._build_download_error_log_header()
+        try:
+            os.makedirs(output_dir, exist_ok=True)
+            with open(self._download_error_log_path, 'w', encoding='utf-8') as f:
+                f.write(header)
+        except OSError as exc:
+            logging.warning('Could not initialize error log at %s: %s', self._download_error_log_path, exc)
+            self._download_error_log_path = None
+
+    def _ensure_download_error_log_target(self, output_dir: str):
+        """Point error logging at a folder without resetting an active batch log."""
+        output_dir = self._normalize_error_log_dir(output_dir)
+        error_path = os.path.join(output_dir, 'error.txt')
+        if self._download_error_log_path == error_path:
+            return
+        self._download_error_log_path = error_path
+        if self._download_error_log_context is None:
+            self._download_error_log_context = {
+                'type': 'download',
+                'name': '',
+                'id': '',
+                'service': self.service_name or '',
+            }
+
+    def _build_download_error_log_header(self) -> str:
+        ctx = self._download_error_log_context or {}
+        service = ctx.get('service') or self.service_name or 'unknown'
+        context_type = ctx.get('type') or 'download'
+        context_name = ctx.get('name') or ''
+        context_id = ctx.get('id') or ''
+        timestamp = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
+        lines = [
+            '# OrpheusDL — tracks not downloaded',
+            f'# Generated: {timestamp}',
+            f'# Service: {service}',
+        ]
+        if context_name or context_id:
+            label = context_name
+            if context_id:
+                label = f'{label} ({context_id})' if label else str(context_id)
+            lines.append(f'# {context_type.title()}: {label}')
+        lines.append('#')
+        return '\n'.join(lines) + '\n'
+
+    def _format_track_error_log_line(
+        self,
+        reason: str,
+        track_id=None,
+        track_name=None,
+        artists=None,
+        track_index=None,
+        number_of_tracks=None,
+        track_number=None,
+        disc_number=None,
+        simplify_reason=True,
+    ) -> str:
+        position = ''
+        if track_number and disc_number and int(disc_number) > 1:
+            position = f'[disc {int(disc_number)} track {int(track_number)}] '
+        elif track_number and number_of_tracks:
+            position = f'[track {int(track_number)}/{int(number_of_tracks)}] '
+        elif track_number:
+            position = f'[track {int(track_number)}] '
+        elif track_index and number_of_tracks:
+            position = f'[{int(track_index):02d}/{int(number_of_tracks)}] '
+        elif track_index:
+            position = f'[{int(track_index)}] '
+        elif track_number:
+            position = f'[track {int(track_number)}] '
+
+        artist_str = ''
+        if artists:
+            artist_str = ', '.join(str(a) for a in artists if a)
+        elif artists is not None:
+            artist_str = str(artists)
+
+        title = track_name or 'Unknown track'
+        if artist_str:
+            title = f'{artist_str} - {title}'
+
+        id_part = ''
+        if track_id is not None and str(track_id).strip():
+            id_part = f' (id={track_id})'
+            track_url = platform_track_url(self.service_name, track_id)
+            if track_url:
+                id_part += f' | {track_url}'
+
+        reason_text = str(reason).strip() if reason else 'Download failed'
+        if simplify_reason:
+            reason_text = simplify_error_message(reason_text)
+        return f'{position}{title}{id_part}\n  Reason: {reason_text}'
+
+    def _append_download_error_log_line(self, line: str):
+        if not self._download_error_log_path:
+            return
+        try:
+            log_dir = os.path.dirname(self._download_error_log_path)
+            if log_dir:
+                os.makedirs(log_dir, exist_ok=True)
+            write_header = not os.path.exists(self._download_error_log_path)
+            with open(self._download_error_log_path, 'a', encoding='utf-8') as f:
+                if write_header:
+                    f.write(self._build_download_error_log_header())
+                f.write(line.rstrip() + '\n\n')
+            self._download_error_count += 1
+        except OSError as exc:
+            logging.warning('Could not write to error log %s: %s', self._download_error_log_path, exc)
+
+    def _log_track_download_error(
+        self,
+        reason: str,
+        track_id=None,
+        track_info: TrackInfo = None,
+        track_name=None,
+        artists=None,
+        track_index=None,
+        number_of_tracks=None,
+        album_location: str = '',
+    ):
+        if album_location:
+            self._ensure_download_error_log_target(album_location)
+        elif self.path:
+            self._ensure_download_error_log_target(self.path)
+
+        if track_info is not None:
+            track_name = track_name or track_info.name
+            artists = artists if artists is not None else track_info.artists
+            track_id = track_id if track_id is not None else getattr(track_info, 'id', None)
+            if not reason and getattr(track_info, 'error', None):
+                reason = track_info.error
+
+        track_number = None
+        disc_number = None
+        if isinstance(track_info, TrackInfo) and track_info.tags:
+            track_number = track_info.tags.track_number
+            disc_number = track_info.tags.disc_number
+
+        line = self._format_track_error_log_line(
+            reason=reason,
+            track_id=track_id,
+            track_name=track_name,
+            artists=artists,
+            track_index=track_index,
+            number_of_tracks=number_of_tracks,
+            track_number=track_number,
+            disc_number=disc_number,
+            simplify_reason=True,
+        )
+        self._append_download_error_log_line(line)
+
+    def _make_catalog_track_probe(self):
+        """Optional callback to resolve metadata for guessed numeric catalog IDs."""
+        service = self.service
+        if not service:
+            return None
+        service_name = (self.service_name or '').lower()
+        session = getattr(service, 'session', None)
+
+        if service_name == 'tidal' and session and hasattr(session, 'get_track'):
+            def probe(track_id: str):
+                try:
+                    return session.get_track(str(track_id))
+                except Exception as exc:
+                    return {'error': str(exc)}
+            return probe
+
+        if service_name == 'qobuz' and session and hasattr(session, 'get_track'):
+            def probe(track_id: str):
+                try:
+                    return session.get_track(str(track_id))
+                except Exception as exc:
+                    return {'error': str(exc)}
+            return probe
+
+        if service_name == 'deezer' and session and hasattr(session, 'get_track'):
+            def probe(track_id: str):
+                try:
+                    return session.get_track(str(track_id))
+                except Exception as exc:
+                    return {'error': str(exc)}
+            return probe
+
+        return None
+
+    def _resolve_album_catalog_exclusions(self, album_info):
+        return merge_album_exclusions(album_info, probe_callback=self._make_catalog_track_probe())
+
+    def _log_catalog_track_gaps(
+        self,
+        expected_count: int,
+        actual_count: int,
+        excluded_tracks=None,
+        album_location: str = '',
+        context_id: str = '',
+        context_type: str = 'album',
+    ):
+        logged_specific = 0
+        if excluded_tracks:
+            for item in excluded_tracks:
+                if not isinstance(item, dict):
+                    continue
+                self._log_catalog_excluded_track(item, expected_count, album_location)
+                logged_specific += 1
+
+        if not expected_count or expected_count <= actual_count:
+            return
+
+        missing = expected_count - actual_count
+        unexplained = missing - logged_specific
+        if unexplained > 0 and logged_specific == 0:
+            browse_url = catalog_summary_url(self.service_name, context_type, context_id)
+            browse_hint = f' Check the {context_type} on {browse_url}' if browse_url else ''
+            summary_reason = (
+                f'Catalog reports {expected_count} tracks but only {actual_count} are in the download list.'
+                f'{browse_hint} The missing track(s) were not exposed by the service API '
+                f'(may be region-locked or delisted).'
+            )
+            self._log_track_download_error(
+                reason=summary_reason,
+                track_name='(could not resolve missing track — see entries above if any)',
+                album_location=album_location,
+            )
+
+    def _log_catalog_excluded_track(self, item: dict, number_of_tracks=None, album_location: str = ''):
+        if not isinstance(item, dict):
+            return
+        line = self._format_track_error_log_line(
+            reason=item.get('reason') or 'Not included in download list',
+            track_id=item.get('id'),
+            track_name=item.get('name') or item.get('title'),
+            artists=item.get('artists') or item.get('artist'),
+            track_number=item.get('track_number'),
+            disc_number=item.get('disc_number'),
+            number_of_tracks=number_of_tracks,
+            simplify_reason=False,
+        )
+        if album_location:
+            self._ensure_download_error_log_target(album_location)
+        elif self.path:
+            self._ensure_download_error_log_target(self.path)
+        self._append_download_error_log_line(line)
+
+    def _finalize_download_error_log(self):
+        """Remove error.txt when nothing was logged for this batch."""
+        if not self._download_error_log_path:
+            return
+        if self._download_error_count > 0:
+            return
+        try:
+            if os.path.isfile(self._download_error_log_path):
+                with open(self._download_error_log_path, 'r', encoding='utf-8') as f:
+                    body = f.read().strip()
+                header_only = body.startswith('#') and 'Reason:' not in body
+                if not body or header_only:
+                    os.remove(self._download_error_log_path)
+        except OSError:
+            pass
+        finally:
+            self._download_error_log_path = None
+            self._download_error_log_context = None
 
     def _fetch_metadata(self, track_info: TrackInfo):
         """Fetches lyrics and credits using either the main service or third-party modules."""
@@ -497,14 +810,20 @@ class Downloader:
             pause_seconds = self._get_spotify_pause_seconds()
             if pause_seconds <= 0:
                 return False
-            jitter = pause_seconds * 0.25
-            pause_actual = random.uniform(pause_seconds - jitter, pause_seconds + jitter)
+            if self._is_spotify_librespot_mode():
+                pause_actual = pause_seconds
+            else:
+                jitter = pause_seconds * 0.25
+                pause_actual = random.uniform(pause_seconds - jitter, pause_seconds + jitter)
             self._sleep_with_countdown(pause_actual, drop_level=1, with_padding=True)
             return True
         return False
 
+    def _countdown_indent_prefix(self, drop_level=1):
+        return ' ' * (self.oprinter.indent_number - drop_level * self.oprinter.multiplier)
+
     def _sleep_with_countdown(self, pause_seconds, drop_level=1, with_padding=False):
-        """Sleep with a 1s countdown log updating the pause sentence."""
+        """Sleep with a 1s countdown log updating the pause sentence on one line (TTY)."""
         try:
             pause_seconds = float(pause_seconds)
         except (TypeError, ValueError):
@@ -515,17 +834,32 @@ class Downloader:
         if with_padding:
             print()
 
+        use_inplace = sys.stdout.isatty() and self.oprinter.printing_enabled
+        indent = self._countdown_indent_prefix(drop_level)
         end_time = time.time() + pause_seconds
         last_remaining = None
+        last_line_len = 0
         while True:
             remaining = int(max(0, end_time - time.time()) + 0.999)
             if remaining <= 0:
                 break
             if remaining != last_remaining:
                 sec_label = "second" if remaining == 1 else "seconds"
-                self.print(f'Pausing {remaining} {sec_label} to prevent rate limiting...', drop_level=drop_level)
+                msg = f'Pausing {remaining} {sec_label} to prevent rate limiting...'
+                if use_inplace:
+                    line = indent + msg
+                    pad = max(0, last_line_len - len(line))
+                    sys.stdout.write('\r' + line + (' ' * pad))
+                    sys.stdout.flush()
+                    last_line_len = len(line)
+                else:
+                    self.print(msg, drop_level=drop_level)
                 last_remaining = remaining
             time.sleep(min(1.0, max(0.05, end_time - time.time())))
+
+        if use_inplace and last_line_len:
+            sys.stdout.write('\r' + (' ' * last_line_len) + '\r')
+            sys.stdout.flush()
 
         if with_padding:
             print()
@@ -712,6 +1046,11 @@ class Downloader:
                     track_info = await loop.run_in_executor(None, get_track_info_wrapper)
                     meta_sep = self.global_settings['formatting'].get('metadata_separator', ';')
                     track_name = f"{meta_sep.join(track_info.artists)} - {track_info.name}"
+                    self._apply_track_index_to_tags(
+                        track_info,
+                        args.get('track_index', 0),
+                        args.get('number_of_tracks', 0),
+                    )
                     
                     # Check if file already exists BEFORE getting download info (for temp file modules like Deezer)
                     if track_info:
@@ -849,11 +1188,25 @@ class Downloader:
                             # Error case
                             if isinstance(status, str) and status.startswith("Could not get track info: "):
                                 error_msg = status.replace("Could not get track info: ", "")
-                                simplified_error = simplify_error_message(error_msg)
-                                self.print(f"{track_number:0{total_digits}d}/{total_tracks} {symbols['error']} Track {track_name}: {simplified_error} {symbols['red_text']}(failed){symbols['reset']}", drop_level=performance_summary_indent)
+                            elif isinstance(status, str) and status.startswith("Could not get track/download info: "):
+                                error_msg = status.replace("Could not get track/download info: ", "")
                             else:
-                                simplified_error = simplify_error_message(str(status))
-                                self.print(f"{track_number:0{total_digits}d}/{total_tracks} {symbols['error']} {track_name}: {simplified_error} {symbols['red_text']}(failed){symbols['reset']}", drop_level=performance_summary_indent)
+                                error_msg = str(status)
+                            simplified_error = simplify_error_message(error_msg)
+                            self.print(
+                                f"{track_number:0{total_digits}d}/{total_tracks} {symbols['error']} {track_name}: "
+                                f"{simplified_error} {symbols['red_text']}(failed){symbols['reset']}",
+                                drop_level=performance_summary_indent,
+                            )
+                            args_for_log = download_args_list[index] if index < len(download_args_list) else {}
+                            self._log_track_download_error(
+                                reason=simplified_error,
+                                track_id=args_for_log.get('track_id'),
+                                track_name=track_name,
+                                track_index=args_for_log.get('track_index') or track_number,
+                                number_of_tracks=total_tracks,
+                                album_location=args_for_log.get('album_location', ''),
+                            )
                         else:
                             # Success
                             self.print(f"{track_number:0{total_digits}d}/{total_tracks} {symbols['success']} {track_name}", drop_level=performance_summary_indent)
@@ -868,7 +1221,14 @@ class Downloader:
                         
                     except Exception as e:
                         completed_count += 1
-                        self.print(f"???/{total_tracks} {symbols['error']} Track (unknown): {simplify_error_message(str(e))} {symbols['red_text']}(failed){symbols['reset']}", drop_level=performance_summary_indent)
+                        simplified_error = simplify_error_message(str(e))
+                        self.print(f"???/{total_tracks} {symbols['error']} Track (unknown): {simplified_error} {symbols['red_text']}(failed){symbols['reset']}", drop_level=performance_summary_indent)
+                        self._log_track_download_error(
+                            reason=simplified_error,
+                            track_name='Unknown track',
+                            number_of_tracks=total_tracks,
+                            album_location=(download_args_list[0].get('album_location', '') if download_args_list else ''),
+                        )
                         # Flush output to ensure immediate display in GUI
                         import sys
                         if hasattr(sys.stdout, 'flush'):
@@ -1065,6 +1425,18 @@ class Downloader:
             self.print('⚠ Path too long, playlist folder name was truncated for filesystem safety.')
         playlist_path += '/'
         os.makedirs(playlist_path, exist_ok=True)
+
+        self._init_download_error_log(playlist_path, 'playlist', playlist_info.name, playlist_id)
+        expected_playlist_tracks = playlist_info.num_tracks_from_api or playlist_info.num_tracks
+        playlist_exclusions = getattr(playlist_info, 'excluded_tracks', None) or []
+        self._log_catalog_track_gaps(
+            expected_playlist_tracks,
+            number_of_tracks,
+            playlist_exclusions,
+            playlist_path,
+            context_id=playlist_id,
+            context_type='playlist',
+        )
         
         if playlist_info.cover_url:
             self.print('Downloading playlist cover')
@@ -1133,6 +1505,14 @@ class Downloader:
                     self.download_track(track_id_new, album_location=playlist_path, track_index=index, number_of_tracks=number_of_tracks, indent_level=2, m3u_playlist=m3u_playlist_path, extra_kwargs=results[0].extra_kwargs)
                 else:
                     tracks_errored.add(f'{track_info.name} - {track_info.artists[0]}')
+                    self._log_track_download_error(
+                        reason='Track not found on alternate download service',
+                        track_id=track_id,
+                        track_info=track_info,
+                        track_index=index,
+                        number_of_tracks=number_of_tracks,
+                        album_location=playlist_path,
+                    )
                     if ModuleModes.download in self.module_settings[original_service].module_supported_modes:
                         self.service = self.loaded_modules[original_service]
                         self.service_name = original_service
@@ -1301,21 +1681,35 @@ class Downloader:
         print()
         print()
         if tracks_errored: logging.debug('Permanently failed tracks (non-rate-limit): ' + ', '.join(tracks_errored))
+        if self._download_error_count > 0:
+            self.print(
+                f'{self._download_error_count} track issue(s) logged to error.txt in the playlist folder',
+                drop_level=1,
+            )
+        self._finalize_download_error_log()
 
     @staticmethod
     def _get_artist_initials_from_name(album_info: AlbumInfo) -> str:
-        # Remove "the" from the inital string
-        initial = album_info.artist.lower()
-        if album_info.artist.lower().startswith('the'):
-            initial = initial.replace('the ', '')[0].upper()
+        artist = (album_info.artist or '').strip()
+        if not artist:
+            return '#'
+
+        # Skip leading "The " for sorting initials (e.g. "The Beatles" -> B)
+        initial = artist
+        lower = artist.lower()
+        if lower.startswith('the '):
+            initial = artist[4:].strip()
+        elif lower == 'the':
+            initial = ''
+        if not initial:
+            return '#'
 
         # Unicode fix
-        initial = unicodedata.normalize('NFKD', initial[0]).encode('ascii', 'ignore').decode('utf-8')
+        ch = unicodedata.normalize('NFKD', initial[0]).encode('ascii', 'ignore').decode('utf-8')
+        if not ch:
+            return '#'
 
-        # Make the initial upper if it's alpha
-        initial = initial.upper() if initial.isalpha() else '#'
-
-        return initial
+        return ch.upper() if ch.isalpha() else '#'
 
     @staticmethod
     def _compact_path_tag(value: str, max_len: int = 100) -> str:
@@ -1385,6 +1779,56 @@ class Downloader:
 
         return album_path
 
+    def _compute_disc_track_totals(self, tracks: list) -> dict:
+        """Count tracks per disc when the album track list includes disc metadata."""
+        totals = {}
+        for item in tracks:
+            tags = getattr(item, 'tags', None)
+            disc = getattr(tags, 'disc_number', None) if tags else None
+            if disc:
+                totals[disc] = totals.get(disc, 0) + 1
+        return totals if len(totals) > 1 else {}
+
+    def _apply_track_index_to_tags(self, track_info: TrackInfo, track_index: int, number_of_tracks: int) -> None:
+        """Map download index to tags. Playlists/albums can opt into sequential numbering via settings."""
+        if not track_index:
+            return
+        is_playlist_download = (
+            hasattr(self, 'download_mode') and self.download_mode is DownloadTypeEnum.playlist
+        )
+        use_playlist_position = self.global_settings['formatting'].get('use_playlist_position', False)
+        use_album_position = self.global_settings['formatting'].get('use_album_position', False)
+
+        if is_playlist_download:
+            track_info.tags.playlist_position = track_index
+            if track_info.tags.extra_tags is None:
+                track_info.tags.extra_tags = {}
+            if number_of_tracks:
+                # Mutagen Vorbis/FLAC comment fields are string-based; storing ints can break tagger.save()
+                track_info.tags.extra_tags['_playlist_total_tracks'] = str(number_of_tracks)
+            if use_playlist_position:
+                track_info.tags.track_number = track_index
+                if number_of_tracks:
+                    track_info.tags.total_tracks = number_of_tracks
+            return
+
+        if use_album_position:
+            track_info.tags.track_number = track_index
+            if number_of_tracks:
+                track_info.tags.total_tracks = number_of_tracks
+            return
+
+        # Preserve platform-provided per-disc track numbers for album downloads.
+        if not track_info.tags.track_number:
+            track_info.tags.track_number = track_index
+
+        disc_totals = getattr(self, '_current_disc_track_totals', None) or {}
+        disc_number = track_info.tags.disc_number
+        if disc_number and disc_number in disc_totals:
+            track_info.tags.total_tracks = disc_totals[disc_number]
+        elif not track_info.tags.total_tracks and number_of_tracks:
+            track_info.tags.total_tracks = number_of_tracks
+
     def _create_track_location(self, album_location: str, track_info: TrackInfo, override_codec=None) -> str:
         """Create the full file path for a track. Use override_codec (e.g. from download_info.different_codec) for the file extension when the downloaded file is in a different container."""
         # Clean up track tags and add special formats
@@ -1418,10 +1862,25 @@ class Downloader:
         # Add all documented format variables from GUI with default values
         track_tags['track_number'] = str(track_info.tags.track_number) if track_info.tags.track_number else ''
         track_tags['total_tracks'] = str(track_info.tags.total_tracks) if track_info.tags.total_tracks else ''
+        playlist_pos = track_info.tags.playlist_position
+        playlist_pos_str = str(playlist_pos) if playlist_pos else ''
+        if playlist_pos and self.global_settings['formatting']['enable_zfill']:
+            playlist_total = (track_info.tags.extra_tags or {}).get('_playlist_total_tracks')
+            if playlist_total:
+                playlist_pos_str = str(playlist_pos).zfill(len(str(playlist_total)))
+        track_tags['playlist_position'] = playlist_pos_str
         track_tags['disc_number'] = str(track_info.tags.disc_number) if track_info.tags.disc_number else ''
         track_tags['total_discs'] = str(track_info.tags.total_discs) if track_info.tags.total_discs else ''
         track_tags['quality'] = track_info.codec.name if track_info.codec else ''
-        track_tags['artist_initials'] = self._get_artist_initials_from_name(AlbumInfo(name='', artist=track_tags['artist'], tracks=[], release_year=0))
+        # Podcasts/episodes often omit track artists; fall back to show (album_artist/album) for folder sorting.
+        artist_for_initials = (
+            track_tags['artist']
+            or track_tags['album_artist']
+            or track_tags.get('album', '')
+        )
+        track_tags['artist_initials'] = self._get_artist_initials_from_name(
+            AlbumInfo(name='', artist=artist_for_initials, tracks=[], release_year=0)
+        )
         track_tags['name'] = self._compact_path_tag(track_tags.get('name', ''))
 
         # Add aliases for GUI format compatibility (required by default format strings)
@@ -1605,12 +2064,23 @@ class Downloader:
             return []
 
         number_of_tracks = len(album_info.tracks)
+        self._current_disc_track_totals = self._compute_disc_track_totals(album_info.tracks)
 
         path = self.path if not path else path
 
         if number_of_tracks > 1 or self.global_settings['formatting']['force_album_format']:
             # Creates the album_location folders
             album_path = self._create_album_location(path, album_id, album_info)
+
+            self._init_download_error_log(album_path, 'album', album_info.name, album_id)
+            catalog_exclusions = self._resolve_album_catalog_exclusions(album_info)
+            self._log_catalog_track_gaps(
+                getattr(album_info, 'expected_track_count', None),
+                number_of_tracks,
+                catalog_exclusions,
+                album_path,
+                context_id=album_id,
+            )
         
             if self.download_mode is DownloadTypeEnum.album:
                 self.set_indent_number(1)
@@ -1891,6 +2361,12 @@ class Downloader:
             print()
             print()
             if cover_temp_location: silentremove(cover_temp_location)
+            if self._download_error_count > 0:
+                self.print(
+                    f'{self._download_error_count} track issue(s) logged to error.txt in the album folder',
+                    drop_level=1,
+                )
+            self._finalize_download_error_log()
         elif number_of_tracks == 1:
             # Single-track albums go directly to track download without album header or completion message.
             # Pass album_info so download_track can save external album files in the exact resolved track folder.
@@ -1906,6 +2382,7 @@ class Downloader:
                 album_info_for_single=album_info
             )
 
+        self._current_disc_track_totals = {}
         return album_info.tracks
 
     def download_artist(self, artist_id, extra_kwargs=None):        
@@ -1938,7 +2415,7 @@ class Downloader:
 
         # Call get_artist_info based on service-specific signature requirements
         try:
-            if service_name_lower in ['deezer', 'qobuz', 'soundcloud', 'tidal', 'beatport', 'beatsource']:
+            if service_name_lower in ['deezer', 'qobuz', 'soundcloud', 'tidal', 'beatport', 'beatsource', 'amazonmusic']:
                 # These services require 'get_credited_albums' (the boolean value) as the second positional argument.            
                 artist_info: ArtistInfo = self.service.get_artist_info(artist_id, fetch_credited_albums_value, **prepared_kwargs)
             elif service_name_lower == 'spotify':
@@ -2320,6 +2797,8 @@ class Downloader:
                 # First get track info
                 track_info = await loop.run_in_executor(None, get_track_info_fallback)
                 
+                self._apply_track_index_to_tags(track_info, track_index, number_of_tracks)
+
                 # Check if file already exists BEFORE getting download info (for temp file modules like Deezer)
                 if track_info:
                     track_location = self._create_track_location(album_location, track_info)
@@ -2337,6 +2816,8 @@ class Downloader:
         # Extract track_id from track_info if not provided
         if track_id is None:
             track_id = track_info.id
+
+        self._apply_track_index_to_tags(track_info, track_index, number_of_tracks)
             
         # Check if track already exists (for backward compatibility) - use thread pool for file checks
         loop = asyncio.get_event_loop()
@@ -2595,7 +3076,23 @@ class Downloader:
         d_print = self.print if verbose else lambda *args, **kwargs: None
         
         # Helper function to return with consistent blank line
-        def return_with_blank_line(value):
+        def return_with_blank_line(value, failure_reason=None):
+            if value is None or value == "This song is unavailable.":
+                reason = failure_reason
+                if not reason and track_info is not None and getattr(track_info, 'error', None):
+                    reason = track_info.error
+                if not reason and value == "This song is unavailable.":
+                    reason = "Not available (unstreamable, removed, or region-locked)"
+                if not reason:
+                    reason = "Download failed"
+                self._log_track_download_error(
+                    reason=reason,
+                    track_id=display_track_id,
+                    track_info=track_info,
+                    track_index=track_index or None,
+                    number_of_tracks=number_of_tracks or None,
+                    album_location=album_location,
+                )
             # Add blank line after track completion if we're in a multi-track context (album/artist/playlist)
             # Add 2 blank lines for standalone track downloads and single-track albums
             is_standalone_track_download = (hasattr(self, 'download_mode') and 
@@ -2846,9 +3343,8 @@ class Downloader:
 
             d_print(', '.join(codec_info))
 
-        # Add track number to tags if it exists
-        if track_index: track_info.tags.track_number = track_index
-        if number_of_tracks: track_info.tags.total_tracks = number_of_tracks
+        # Playlist index vs album track number (see formatting.use_playlist_position)
+        self._apply_track_index_to_tags(track_info, track_index, number_of_tracks)
 
         # Create track location
         if not album_location:

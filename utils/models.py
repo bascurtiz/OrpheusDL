@@ -269,6 +269,7 @@ class Tags:
     composer: Optional[str] = None
     track_number: Optional[int] = None
     total_tracks: Optional[int] = None
+    playlist_position: Optional[int] = None  # 1-based index when downloaded from a playlist
     copyright: Optional[str] = None
     isrc: Optional[str] = None
     upc: Optional[str] = None
@@ -311,6 +312,11 @@ class AlbumInfo:
     artist: str
     tracks: list
     release_year: int
+    # Catalog size from the service (e.g. TIDAL web UI). When greater than len(tracks),
+    # OrpheusDL logs the gap in error.txt for the album output folder.
+    expected_track_count: Optional[int] = None
+    # Tracks known to the service but excluded from tracks (id/name/reason dicts).
+    excluded_tracks: Optional[list] = None
     duration: Optional[int] = None  # Duration in whole seconds
     explicit: Optional[bool] = False
     artist_id: Optional[str] = None
@@ -349,6 +355,7 @@ class PlaylistInfo:
     id: Optional[str] = None
     num_tracks: Optional[int] = None
     num_tracks_from_api: Optional[int] = None
+    excluded_tracks: Optional[list] = None  # [{id, name/title, reason}] not in tracks
     duration: Optional[int] = None  # Duration in whole seconds
     explicit: Optional[bool] = False
     creator_id: Optional[str] = None
