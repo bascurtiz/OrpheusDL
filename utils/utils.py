@@ -639,7 +639,8 @@ def resolve_mp4decrypt():
     import shutil
     from pathlib import Path
 
-    names = _MP4DECRYPT_NAMES.get(_platform.system())
+    system = _platform.system()
+    names = _MP4DECRYPT_NAMES.get(system)
     if not names:
         return None
 
@@ -650,8 +651,20 @@ def resolve_mp4decrypt():
                 return candidate.resolve()
 
     env = get_clean_env()
+    search_path = env.get('PATH', '')
+    # Finder-launched .app bundles inherit a minimal PATH that omits Homebrew and
+    # other common bin dirs, so a `brew install bento4` binary is otherwise invisible.
+    if system in ('Darwin', 'Linux'):
+        extra_dirs = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin']
+        home = env.get('HOME')
+        if home:
+            extra_dirs.append(os.path.join(home, '.local', 'bin'))
+        existing = search_path.split(os.pathsep) if search_path else []
+        merged = existing + [d for d in extra_dirs if d not in existing]
+        search_path = os.pathsep.join(merged)
+
     for name in names:
-        found = shutil.which(name, path=env.get('PATH'))
+        found = shutil.which(name, path=search_path or None)
         if found:
             path = Path(found)
             if path.is_file() and path.stat().st_size > 0:

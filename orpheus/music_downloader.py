@@ -44,6 +44,12 @@ except ModuleNotFoundError:
     class SpotifyConfigError(Exception):
         pass
 
+# Spotify Desktop / .dll pacing: votify-style "safe mode". Between most tracks we wait a
+# short interval; every 3rd track we do the full pause (download_pause_seconds) to avoid
+# account suspensions, instead of the long pause after every single track.
+SPOTIFY_DLL_WAIT_INTERVAL = 15.0  # seconds between tracks (full pause every 3rd track)
+SPOTIFY_DLL_PAUSE_EVERY = 3       # apply the full pause every N tracks
+
 # Platform colors from GUI (hex colors converted to closest ANSI equivalents)
 PLATFORM_COLORS = {
     "tidal": "\033[96m",         # Bright cyan (#33ffe7 -> bright cyan)
@@ -803,6 +809,12 @@ class Downloader:
     def _handle_spotify_rate_limit_pause(self, download_result, index, number_of_tracks, service_name_override=None):
         """Helper to handle the Spotify rate-limiting pause consistently.
         Only pauses if download was successful, not the last track, and service is Spotify.
+
+        Desktop / Spotify.dll mode uses votify-style pacing: a short interval
+        (SPOTIFY_DLL_WAIT_INTERVAL) between tracks and the full pause every 3rd track.
+        This keeps the periodic long pause that prevents account suspensions while
+        cutting total wait time. Librespot mode keeps the legacy fixed pause after
+        every track.
         """
         service_name = service_name_override if service_name_override else (self.service_name.lower() if hasattr(self, 'service_name') and self.service_name else "")
         if (service_name == 'spotify' and index < number_of_tracks and 
@@ -813,8 +825,10 @@ class Downloader:
             if self._is_spotify_librespot_mode():
                 pause_actual = pause_seconds
             else:
-                jitter = pause_seconds * 0.25
-                pause_actual = random.uniform(pause_seconds - jitter, pause_seconds + jitter)
+                # votify-style: full pause every Nth track, short interval otherwise.
+                base = pause_seconds if (index % SPOTIFY_DLL_PAUSE_EVERY == 0) else SPOTIFY_DLL_WAIT_INTERVAL
+                jitter = base * 0.25
+                pause_actual = random.uniform(max(0.0, base - jitter), base + jitter)
             self._sleep_with_countdown(pause_actual, drop_level=1, with_padding=True)
             return True
         return False

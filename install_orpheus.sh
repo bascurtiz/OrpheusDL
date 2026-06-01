@@ -77,6 +77,8 @@ if ! eval "$REQ_CMD"; then
 fi
 
 # Force the required unplayplay build to avoid stale preinstalled versions.
+echo "[*] Cleaning stale unplayplay metadata..."
+python -c "import shutil,site; from pathlib import Path; roots=[Path(p) for p in site.getsitepackages()]; roots+=[Path(site.getusersitepackages())] if site.ENABLE_USER_SITE else []; [shutil.rmtree(e, ignore_errors=True) or print('[cleanup] Removed', e) for r in roots if r.is_dir() for e in r.iterdir() if e.name.startswith('unplayplay-0.0.8')]"
 echo "[*] Forcing unplayplay==0.0.9..."
 pip uninstall -y unplayplay >/dev/null 2>&1 || true
 pip install --no-cache-dir --upgrade --force-reinstall "unplayplay==0.0.9"
@@ -119,7 +121,7 @@ python orpheus.py settings refresh
 # -------------------------------
 echo "[*] Updating certifi..."
 
-pip install --upgrade certifi
+pip install --upgrade --ignore-installed certifi || pip install --force-reinstall --no-deps certifi
 
 # -------------------------------
 # INSTALL MODULES
@@ -128,6 +130,7 @@ echo "[*] Installing modules..."
 
 mkdir -p modules
 
+git clone https://github.com/bascurtiz/orpheusdl-amazonmusic modules/amazonmusic
 git clone https://github.com/bascurtiz/orpheusdl-applemusic modules/applemusic
 git clone https://github.com/bascurtiz/orpheusdl-beatport modules/beatport
 git clone https://github.com/bascurtiz/orpheusdl-beatsource modules/beatsource
