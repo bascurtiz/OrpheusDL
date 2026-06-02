@@ -612,13 +612,13 @@ class Downloader:
                     fetch_extra_kwargs = track_info.lyrics_extra_kwargs
                     
                     if lyrics_module != 'default' and lyrics_module != self.service_name:
-                        self.print(f'Searching for lyrics on {lyrics_module}...')
+                        self._metadata_print(f'Searching for lyrics on {lyrics_module}...')
                         search_results = self.search_by_tags(str(lyrics_module).lower(), track_info)
                         if search_results:
                             fetch_id = search_results[0].result_id
                             fetch_extra_kwargs = search_results[0].extra_kwargs
                         else:
-                            self.print(f'Lyrics match not found on {lyrics_module}')
+                            self._metadata_print(f'Lyrics match not found on {lyrics_module}')
                             fetch_id = None
 
                     if fetch_id:
@@ -630,7 +630,7 @@ class Downloader:
                             lyrics_info = future.result(timeout=lyrics_timeout_sec)
                         except FuturesTimeoutError:
                             future.cancel()
-                            self.print(f'Could not fetch lyrics: request timed out after {lyrics_timeout_sec}s')
+                            self._metadata_print(f'Could not fetch lyrics: request timed out after {lyrics_timeout_sec}s')
                             lyrics_info = None
                         finally:
                             # Do not block shutdown on timed-out provider calls.
@@ -640,9 +640,32 @@ class Downloader:
                             # Pass synced lyrics to the caller via an attribute for saving
                             track_info.synced_lyrics = lyrics_info.synced
                         else:
-                            self.print('No lyrics available for this track')
+                            self._metadata_print('No lyrics available for this track')
                 except Exception as e:
-                    self.print(f'Could not fetch lyrics: {e}')
+                    self._metadata_print(f'Could not fetch lyrics: {e}')
+
+            # Fallback: if default/source lyrics are empty, try lrclib when available.
+            if not getattr(track_info, 'lyrics', None) and not getattr(track_info, 'synced_lyrics', None):
+                if lyrics_module == 'default' and 'lrclib' in self.module_list:
+                    try:
+                        lrclib_name = 'lrclib'
+                        if lrclib_name not in self.loaded_modules:
+                            self.load_module(lrclib_name)
+                        lrclib_service = self.loaded_modules.get(lrclib_name)
+                        if lrclib_service and hasattr(lrclib_service, 'get_track_lyrics'):
+                            self._metadata_print('Searching for lyrics on lrclib...')
+                            search_results = self.search_by_tags(lrclib_name, track_info)
+                            if search_results:
+                                fetch_id = search_results[0].result_id
+                                fetch_extra_kwargs = search_results[0].extra_kwargs or {}
+                                lyrics_info = lrclib_service.get_track_lyrics(fetch_id, **fetch_extra_kwargs)
+                                if lyrics_info:
+                                    track_info.lyrics = lyrics_info.embedded
+                                    track_info.synced_lyrics = lyrics_info.synced
+                            else:
+                                self._metadata_print('Lyrics match not found on lrclib')
+                    except Exception as e:
+                        self._metadata_print(f'Could not fetch fallback lyrics: {e}')
 
         # 2. Fetch Credits
         credits_module = self.third_party_modules.get(ModuleModes.credits) or self.third_party_modules.get('credits', 'default') if self.third_party_modules else 'default'
@@ -674,6 +697,55 @@ class Downloader:
                 track_info.credits_list = []
         else:
             track_info.credits_list = []
+
+    @staticmethod
+    def _ensure_track_info_id(track_info: TrackInfo, track_id):
+        """Populate TrackInfo.id when modules omit it (needed for lyrics/credits fetch)."""
+        if not track_info:
+            return track_info
+        if getattr(track_info, 'id', None):
+            return track_info
+        if track_id is None:
+            return track_info
+        try:
+            track_info.id = str(track_id)
+        except Exception:
+            pass
+        return track_info
+
+    def _metadata_print(self, message: str):
+        """Avoid interleaved per-track metadata noise during concurrent downloads."""
+        try:
+            concurrent_downloads = int(self.global_settings.get('general', {}).get('concurrent_downloads', 1) or 1)
+        except Exception:
+            concurrent_downloads = 1
+        if concurrent_downloads <= 1:
+            self.print(message)
+
+    def _get_display_quality(self, extra_kwargs=None):
+        """Human-readable quality shown in logs, honoring per-download overrides."""
+        quality_setting = str(self.global_settings.get('general', {}).get('download_quality', 'high') or 'high').lower()
+        if quality_setting == 'hifi':
+            pretty_quality = 'HiFi'
+        elif quality_setting == 'atmos':
+            pretty_quality = 'Atmos'
+        else:
+            pretty_quality = quality_setting.capitalize()
+
+        # Some GUI context-menu downloads override codec per request (e.g. Amazon HI-RES)
+        # without changing the global quality setting.
+        if self.service_name and self.service_name.lower() == 'amazonmusic' and isinstance(extra_kwargs, dict):
+            max_q = str(extra_kwargs.get('max_track_quality_to_use', '') or '').upper()
+            if max_q == 'UHD':
+                return 'HiFi'
+            if max_q == 'HD':
+                return 'Lossless'
+            song_codec = str(extra_kwargs.get('song_codec', '') or '').lower()
+            if 'hi-res' in song_codec or 'hires' in song_codec:
+                return 'HiFi'
+            if 'atmos' in song_codec:
+                return 'Atmos'
+        return pretty_quality
 
     def _is_auth_or_credentials_error(self, exc):
         """True if the exception is auth/credentials-related (retrying would not help)."""
@@ -1021,6 +1093,7 @@ class Downloader:
                     if tidal_rpm is not None:
                         await tidal_rpm.acquire()
                     track_info = await loop.run_in_executor(None, get_track_info_wrapper)
+                    track_info = self._ensure_track_info_id(track_info, track_id)
                     meta_sep = self.global_settings['formatting'].get('metadata_separator', ';')
                     track_name = f"{meta_sep.join(track_info.artists)} - {track_info.name}"
                     self._apply_track_index_to_tags(
@@ -1418,11 +1491,8 @@ class Downloader:
         colored_platform = get_colored_platform_name(self.module_settings[self.service_name].service_name)
         self.print(f'Platform: {colored_platform}')
         
-        # Display selected quality from global settings
-        quality_setting = self.global_settings['general']['download_quality']
-        pretty_quality = quality_setting.capitalize()
-        if quality_setting.lower() == 'hifi': pretty_quality = 'HiFi'
-        elif quality_setting.lower() == 'atmos': pretty_quality = 'Atmos'
+        # Display selected quality (global + per-request overrides)
+        pretty_quality = self._get_display_quality(extra_kwargs)
         self.print(f'Quality: {pretty_quality}')
         
         if playlist_info.animated_cover_url and self.global_settings['covers']['save_animated_cover']:
@@ -2068,11 +2138,8 @@ class Downloader:
             colored_platform = get_colored_platform_name(self.module_settings[self.service_name].service_name)
             self.print(f'Platform: {colored_platform}')
 
-            # Display selected quality from global settings
-            quality_setting = self.global_settings['general']['download_quality']
-            pretty_quality = quality_setting.capitalize()
-            if quality_setting.lower() == 'hifi': pretty_quality = 'HiFi'
-            elif quality_setting.lower() == 'atmos': pretty_quality = 'Atmos'
+            # Display selected quality (global + per-request overrides)
+            pretty_quality = self._get_display_quality(extra_kwargs)
             self.print(f'Quality: {pretty_quality}')
 
             if album_info.booklet_url and not os.path.exists(album_path + 'Booklet.pdf'):
@@ -2428,11 +2495,8 @@ class Downloader:
         colored_platform = get_colored_platform_name(self.module_settings[self.service_name].service_name)
         self.print(f'Platform: {colored_platform}')
 
-        # Display selected quality from global settings
-        quality_setting = self.global_settings['general']['download_quality']
-        pretty_quality = quality_setting.capitalize()
-        if quality_setting.lower() == 'hifi': pretty_quality = 'HiFi'
-        elif quality_setting.lower() == 'atmos': pretty_quality = 'Atmos'
+        # Display selected quality (global + per-request overrides)
+        pretty_quality = self._get_display_quality(extra_kwargs)
         self.print(f'Quality: {pretty_quality}')
         artist_path = os.path.join(self.path, sanitise_name(artist_name)) + '/'
         
@@ -2671,11 +2735,8 @@ class Downloader:
         colored_platform = get_colored_platform_name(self.module_settings[self.service_name].service_name)
         self.print(f'Platform: {colored_platform}')
 
-        # Display selected quality from global settings
-        quality_setting = self.global_settings['general']['download_quality']
-        pretty_quality = quality_setting.capitalize()
-        if quality_setting.lower() == 'hifi': pretty_quality = 'HiFi'
-        elif quality_setting.lower() == 'atmos': pretty_quality = 'Atmos'
+        # Display selected quality (global + per-request overrides)
+        pretty_quality = self._get_display_quality(extra_kwargs)
         self.print(f'Quality: {pretty_quality}')
         label_path = os.path.join(self.path, sanitise_name(label_name)) + '/'
         os.makedirs(label_path, exist_ok=True)
@@ -2763,6 +2824,7 @@ class Downloader:
                 
                 # First get track info
                 track_info = await loop.run_in_executor(None, get_track_info_fallback)
+                track_info = self._ensure_track_info_id(track_info, track_id)
                 
                 self._apply_track_index_to_tags(track_info, track_index, number_of_tracks)
 
@@ -3120,6 +3182,7 @@ class Downloader:
                 # Ensure extra_kwargs is always a dictionary
                 safe_extra_kwargs = extra_kwargs if extra_kwargs is not None else {}
                 track_info = self.service.get_track_info(track_id, quality_tier, codec_options, **safe_extra_kwargs)
+                track_info = self._ensure_track_info_id(track_info, track_id)
 
                 # If we got track info, break out of retry loop
                 if track_info is not None:
