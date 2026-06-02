@@ -44,12 +44,6 @@ except ModuleNotFoundError:
     class SpotifyConfigError(Exception):
         pass
 
-# Spotify Desktop / .dll pacing: votify-style "safe mode". Between most tracks we wait a
-# short interval; every 3rd track we do the full pause (download_pause_seconds) to avoid
-# account suspensions, instead of the long pause after every single track.
-SPOTIFY_DLL_WAIT_INTERVAL = 15.0  # seconds between tracks (full pause every 3rd track)
-SPOTIFY_DLL_PAUSE_EVERY = 3       # apply the full pause every N tracks
-
 # Platform colors from GUI (hex colors converted to closest ANSI equivalents)
 PLATFORM_COLORS = {
     "tidal": "\033[96m",         # Bright cyan (#33ffe7 -> bright cyan)
@@ -698,22 +692,13 @@ class Downloader:
         """Normalized service name for error messages (e.g. 'applemusic', 'deezer')."""
         return (self.service_name or '').lower().replace(' ', '') if hasattr(self, 'service_name') and self.service_name else 'service'
 
-    def _is_spotify_librespot_mode(self):
-        """True when Spotify is configured to use Librespot (not Desktop API DLL mode)."""
-        try:
-            creds = ((self.full_settings or {}).get('credentials') or {}).get('Spotify') or {}
-            use_dll = str(creds.get("use_spotify_dll", "false")).lower() in ("true", "1", "yes")
-            return not use_dll
-        except Exception:
-            return False
-
     def _normalize_service_error_message(self, msg):
         """Normalize known misleading backend messages for the active service mode."""
         service_key = self._service_key()
         normalized = str(msg).strip()
 
         # Librespot mode should not instruct users to configure Desktop API requirements.
-        if service_key == 'spotify' and self._is_spotify_librespot_mode():
+        if service_key == 'spotify':
             lower_msg = normalized.lower()
             if "spotify download requirements missing" in lower_msg or (
                 "spotify.dll" in lower_msg and "spotify-cookies.txt" in lower_msg
@@ -771,8 +756,7 @@ class Downloader:
                 spot = self.full_settings['modules']['spotify']
                 raw = spot.get('download_pause_seconds')
                 if raw is None or raw == '':
-                    use_dll = str(spot.get('use_spotify_dll', 'false')).lower() in ('true', '1', 'yes')
-                    return 60.0 if use_dll else 30.0
+                    return 30.0
                 return float(raw)
         except (KeyError, ValueError, TypeError):
             pass
@@ -800,11 +784,7 @@ class Downloader:
         """Helper to handle the Spotify rate-limiting pause consistently.
         Only pauses if download was successful, not the last track, and service is Spotify.
 
-        Desktop / Spotify.dll mode uses votify-style pacing: a short interval
-        (SPOTIFY_DLL_WAIT_INTERVAL) between tracks and the full pause every 3rd track.
-        This keeps the periodic long pause that prevents account suspensions while
-        cutting total wait time. Librespot mode keeps the legacy fixed pause after
-        every track.
+        Librespot mode uses a fixed pause after every track to prevent rate limiting.
         """
         service_name = service_name_override if service_name_override else (self.service_name.lower() if hasattr(self, 'service_name') and self.service_name else "")
         if (service_name == 'spotify' and index < number_of_tracks and 
@@ -812,14 +792,7 @@ class Downloader:
             pause_seconds = self._get_spotify_pause_seconds()
             if pause_seconds <= 0:
                 return False
-            if self._is_spotify_librespot_mode():
-                pause_actual = pause_seconds
-            else:
-                # votify-style: full pause every Nth track, short interval otherwise.
-                base = pause_seconds if (index % SPOTIFY_DLL_PAUSE_EVERY == 0) else SPOTIFY_DLL_WAIT_INTERVAL
-                jitter = base * 0.25
-                pause_actual = random.uniform(max(0.0, base - jitter), base + jitter)
-            self._sleep_with_countdown(pause_actual, drop_level=1, with_padding=True)
+            self._sleep_with_countdown(pause_seconds, drop_level=1, with_padding=True)
             return True
         return False
 
@@ -1440,7 +1413,7 @@ class Downloader:
         
         if playlist_info.cover_url:
             self.print('Downloading playlist cover')
-            download_file(playlist_info.cover_url, f'{playlist_path}cover.{playlist_info.cover_type.name}', artwork_settings=self._get_artwork_settings())
+            download_file(playlist_info.cover_url, f'{playlist_path}cover.{playlist_info.cover_type.name}', artwork_settings=self._get_artwork_settings(is_external=True))
         
         colored_platform = get_colored_platform_name(self.module_settings[self.service_name].service_name)
         self.print(f'Platform: {colored_platform}')
@@ -2023,7 +1996,7 @@ class Downloader:
 
     def _download_album_files(self, album_path: str, album_info: AlbumInfo):
         if album_info.cover_url and self.global_settings['covers']['save_external']:
-            download_file(album_info.cover_url, f'{album_path}cover.{album_info.cover_type.name}', artwork_settings=self._get_artwork_settings())
+            download_file(album_info.cover_url, f'{album_path}cover.{album_info.cover_type.name}', artwork_settings=self._get_artwork_settings(is_external=True))
 
         if album_info.animated_cover_url and self.global_settings['covers']['save_animated_cover']:
             self.print('Downloading animated album cover')
