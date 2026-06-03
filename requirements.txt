@@ -15,11 +15,11 @@ yt-dlp[default]
 yt-dlp-ejs
 CTkToolTip
 customtkinter
+tkinterdnd2
 packaging
 httpx
 async_lru==2.1.0
 pybase62
-unplayplay==0.0.9
 dataclass-click
 inquirerpy
 pfzy

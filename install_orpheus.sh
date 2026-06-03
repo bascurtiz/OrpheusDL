@@ -28,21 +28,6 @@ git clone https://github.com/bascurtiz/OrpheusDL
 cd OrpheusDL || exit
 
 # -------------------------------
-# DOWNLOAD SPOTIFY.DLL
-# -------------------------------
-echo "[*] Downloading Spotify.dll..."
-
-if command -v curl >/dev/null 2>&1; then
-    if ! curl -fsSL "http://orpheusdl-gui.x10.mx/Spotify.dll" -o "Spotify.dll"; then
-        echo "[FATAL] Failed to download Spotify.dll"
-        exit 1
-    fi
-else
-    echo "[FATAL] curl is not available to download Spotify.dll"
-    exit 1
-fi
-
-# -------------------------------
 # CREATE VENV
 # -------------------------------
 echo "[*] Creating virtual environment..."
@@ -74,18 +59,6 @@ fi
 if ! eval "$REQ_CMD"; then
     echo "[!] Full requirements install failed."
     echo "[!] Attempting to install core runtime dependencies needed for startup..."
-fi
-
-# Force the required unplayplay build to avoid stale preinstalled versions.
-echo "[*] Cleaning stale unplayplay metadata..."
-python -c "import shutil,site; from pathlib import Path; roots=[Path(p) for p in site.getsitepackages()]; roots+=[Path(site.getusersitepackages())] if site.ENABLE_USER_SITE else []; [shutil.rmtree(e, ignore_errors=True) or print('[cleanup] Removed', e) for r in roots if r.is_dir() for e in r.iterdir() if e.name.startswith('unplayplay-0.0.8')]"
-echo "[*] Forcing unplayplay==0.0.9..."
-pip uninstall -y unplayplay >/dev/null 2>&1 || true
-pip install --no-cache-dir --upgrade --force-reinstall "unplayplay==0.0.9"
-UNPLAYPLAY_VERSION="$(pip show unplayplay 2>/dev/null | awk -F': ' '/^Version:/{print $2}')"
-if [ "$UNPLAYPLAY_VERSION" != "0.0.9" ]; then
-    echo "[FATAL] Expected unplayplay 0.0.9 but found '${UNPLAYPLAY_VERSION:-not installed}'."
-    exit 1
 fi
 
 # Ensure core HTTP/runtime deps are always present even if the full install fails.
