@@ -129,7 +129,7 @@ loaded module. You'll find the configuration file here: `config/settings.json`
 
 ```json5
 {
-    "discography_format": "{name}{quality}",
+    "discography_format": "{name} {quality}",
     "album_format": "{name}{explicit}",
     "playlist_format": "{name}{explicit}",
     "track_filename_format": "{track_number}. {name}",

@@ -830,8 +830,115 @@ class Downloader:
         if concurrent_downloads <= 1:
             self.print(message)
 
-    def _get_display_quality(self, extra_kwargs=None):
-        """Human-readable quality shown in logs, honoring per-download overrides."""
+    @staticmethod
+    def _album_quality_text_parts(quality_str) -> list:
+        """Split album/catalog quality text; drop track-count and catalog-number noise."""
+        if not quality_str:
+            return []
+        parts = []
+        for part in re.split(r'\s*/\s*', str(quality_str)):
+            piece = part.strip()
+            if not piece:
+                continue
+            if re.search(r'\d+\s*tracks?\b', piece, re.I):
+                continue
+            if re.search(r'\bcat\s*:', piece, re.I):
+                continue
+            parts.append(piece)
+        return parts
+
+    @staticmethod
+    def _format_album_quality_display(quality_str) -> str:
+        """Human-readable album/catalog quality for download logs (not the global tier setting)."""
+        if not quality_str:
+            return ''
+        text = str(quality_str).strip()
+        parts = Downloader._album_quality_text_parts(text)
+        if not parts:
+            return text
+        labels = []
+        seen = set()
+        for part in parts:
+            upper = part.upper()
+            label = None
+            if 'ATMOS' in upper or '◗◖' in part:
+                label = 'Atmos'
+            elif '360' in upper and ('REALITY' in upper or 'RA' in upper):
+                label = '360 Reality Audio'
+            elif 'HI-RES' in upper or '🅷' in part or 'ʜɪ' in part.lower():
+                label = 'Hi-Res'
+            elif 'FLAC' in upper:
+                label = 'FLAC'
+            elif 'OPUS' in upper:
+                label = 'OPUS'
+            elif 'IMMERSIVE' in upper:
+                label = 'Immersive Audio'
+            elif re.search(r'\d+(?:\.\d+)?\s*kHz', part, re.I):
+                label = part.replace('/', ' / ').strip()
+            if label and label.lower() not in seen:
+                seen.add(label.lower())
+                labels.append(label)
+        return ' / '.join(labels) if labels else text
+
+    @staticmethod
+    def _album_quality_folder_suffix(quality_str) -> str:
+        """Short folder disambiguation label (HI-RES, ATMOS, FLAC, …)."""
+        if not quality_str:
+            return ''
+        parts = Downloader._album_quality_text_parts(quality_str)
+        if not parts:
+            return sanitise_name(str(quality_str))
+        rank = {
+            'ATMOS': 50,
+            '360RA': 45,
+            'IMMERSIVE': 40,
+            'HI-RES': 35,
+            'FLAC': 25,
+            'OPUS': 15,
+        }
+
+        def _one_label(part: str) -> str:
+            upper = part.upper()
+            if 'ATMOS' in upper or '◗◖' in part:
+                return 'ATMOS'
+            if '360' in upper and ('REALITY' in upper or 'RA' in upper):
+                return '360RA'
+            if 'HI-RES' in upper or '🅷' in part:
+                return 'HI-RES'
+            if 'FLAC' in upper:
+                return 'FLAC'
+            if 'OPUS' in upper:
+                return 'OPUS'
+            if 'IMMERSIVE' in upper:
+                return 'IMMERSIVE'
+            if re.search(r'\d+(?:\.\d+)?\s*kHz', part, re.I):
+                return sanitise_name(part.replace('/', ' '))
+            return sanitise_name(part)
+
+        best = ''
+        best_score = -1
+        for part in parts:
+            label = _one_label(part)
+            score = rank.get(label.upper(), 10)
+            if score > best_score:
+                best_score = score
+                best = label
+        return best
+
+    def _get_display_quality(self, extra_kwargs=None, album_info=None):
+        """Human-readable quality shown in logs (album/catalog first, then overrides, then global tier)."""
+        if album_info and getattr(album_info, 'quality', None):
+            catalog_display = self._format_album_quality_display(album_info.quality)
+            if catalog_display:
+                return catalog_display
+
+        if isinstance(extra_kwargs, dict):
+            catalog = extra_kwargs.get('catalog_quality') or extra_kwargs.get('display_quality')
+            if catalog:
+                catalog_display = self._format_album_quality_display(catalog)
+                if catalog_display:
+                    return catalog_display
+
         quality_setting = str(self.global_settings.get('general', {}).get('download_quality', 'high') or 'high').lower()
         if quality_setting == 'hifi':
             pretty_quality = 'HiFi'
@@ -1929,7 +2036,9 @@ class Downloader:
 
         suffixes = []
         if album_info and album_info.quality:
-            suffixes.append(str(album_info.quality))
+            quality_suffix = self._album_quality_folder_suffix(album_info.quality)
+            if quality_suffix:
+                suffixes.append(quality_suffix)
         if album_info and album_info.catalog_number:
             suffixes.append(str(album_info.catalog_number))
         suffixes.append(album_id_str)
@@ -1970,8 +2079,8 @@ class Downloader:
         album_tags['id'] = str(album_id)
         meta_sep = self.global_settings['formatting'].get('metadata_separator', ';')
         if album_info.quality:
-            q = str(album_info.quality).replace('/', '\u00b7')
-            album_tags['quality'] = sanitise_name(f' [{q}]')
+            q = str(album_info.quality).replace('/', '\u00b7').strip()
+            album_tags['quality'] = f'[{sanitise_name(q)}]' if q else ''
         else:
             album_tags['quality'] = ''
         album_tags['explicit'] = ' 🅴' if album_info.explicit else ''
@@ -2357,8 +2466,8 @@ class Downloader:
             colored_platform = get_colored_platform_name(self.module_settings[self.service_name].service_name)
             self.print(f'Platform: {colored_platform}')
 
-            # Display selected quality (global + per-request overrides)
-            pretty_quality = self._get_display_quality(extra_kwargs)
+            # Display album/catalog quality when known (matches search Additional column)
+            pretty_quality = self._get_display_quality(extra_kwargs, album_info=album_info)
             self.print(f'Quality: {pretty_quality}')
 
             if album_info.booklet_url and not os.path.exists(album_path + 'Booklet.pdf'):
