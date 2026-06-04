@@ -1993,6 +1993,29 @@ class Downloader:
 
         return compact
 
+    @staticmethod
+    def _sanitize_formatted_folder_path(formatted: str) -> str:
+        """
+        Normalize user album/playlist folder templates for filesystem safety.
+
+        When {quality} is empty, templates like "{album_artist} {quality}/{name}" leave
+        "Artist /Album" (trailing space before '/'), which breaks directory creation on Windows.
+        """
+        if not formatted:
+            return ''
+        path = str(formatted).replace('\\', '/').strip()
+        path = re.sub(r' +/', '/', path)
+        path = re.sub(r'/+', '/', path)
+        segments = []
+        for segment in path.split('/'):
+            segment = segment.strip()
+            if not segment:
+                continue
+            segment = segment.rstrip(' .-_')
+            if segment:
+                segments.append(segment)
+        return '/'.join(segments)
+
     def _resolve_album_format_template(self, use_discography_format: bool = False) -> str:
         formatting = self.global_settings.get('formatting', {})
         if use_discography_format:
@@ -2100,7 +2123,9 @@ class Downloader:
         album_tags['catalog_number'] = sanitise_name(album_info.catalog_number) if album_info.catalog_number else ''
 
         album_format_template = self._resolve_album_format_template(use_discography_format)
-        album_path_formatted_name = album_format_template.format(**album_tags).strip()
+        album_path_formatted_name = self._sanitize_formatted_folder_path(
+            album_format_template.format(**album_tags)
+        )
         album_path_raw = os.path.join(path, album_path_formatted_name)
         # fix path byte limit
         album_path = fix_byte_limit(album_path_raw)
@@ -2112,14 +2137,13 @@ class Downloader:
         album_path += '/'
         os.makedirs(album_path, exist_ok=True)
 
-        if use_discography_format:
-            album_path = self._disambiguate_discography_album_path(
-                album_path,
-                album_path_formatted_name,
-                path,
-                album_id,
-                album_info,
-            )
+        album_path = self._disambiguate_discography_album_path(
+            album_path,
+            album_path_formatted_name,
+            path,
+            album_id,
+            album_info,
+        )
 
         return album_path
 
