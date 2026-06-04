@@ -14,7 +14,7 @@ import platform
 import inspect
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 
-# Lazy import ffmpeg to avoid circular import issues in PyInstaller bundles.
+# Lazy import ffmpeg to avoid circular import issues in PyInstaller bundles
 ffmpeg = None
 Error = None
 
@@ -728,11 +728,28 @@ class Downloader:
         return str(module_a or '').strip().lower() == str(module_b or '').strip().lower()
 
     @staticmethod
+    def _credits_cache_value(cached) -> list | None:
+        """Return a contributor list suitable for get_track_credits data[track_id], or None to use the API."""
+        if cached is None:
+            return None
+        if isinstance(cached, list):
+            return cached
+        if isinstance(cached, dict):
+            if 'credits' in cached:
+                credits = cached.get('credits')
+                return credits if isinstance(credits, list) else None
+            # Search/GUI payloads are full track dicts, not contributor caches.
+            if any(k in cached for k in ('title', 'album', 'artists', 'duration')):
+                return None
+        return None
+
+    @staticmethod
     def _prepare_track_fetch_kwargs(fetch_id, fetch_extra_kwargs, method):
         """Normalize search/GUI extra_kwargs for get_track_lyrics / get_track_credits."""
         kwargs = dict(fetch_extra_kwargs or {})
         raw_result = kwargs.pop('raw_result', None)
         kwargs.pop('media_type', None)
+        method_name = getattr(method, '__name__', '')
 
         try:
             sig = inspect.signature(method)
@@ -740,10 +757,19 @@ class Downloader:
             return kwargs
 
         if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
-            if raw_result is not None and 'data' not in kwargs:
-                tid = str(fetch_id) if fetch_id is not None else ''
-                if tid:
-                    kwargs['data'] = {tid: raw_result}
+            if method_name == 'get_track_credits':
+                credits_value = Downloader._credits_cache_value(raw_result)
+                if credits_value is not None:
+                    tid = str(fetch_id) if fetch_id is not None else ''
+                    if tid:
+                        kwargs.setdefault('data', {})[tid] = credits_value
+            elif raw_result is not None and isinstance(raw_result, dict):
+                if method_name == 'get_track_lyrics':
+                    kwargs.setdefault('track_data', raw_result)
+                elif 'data' not in kwargs:
+                    tid = str(fetch_id) if fetch_id is not None else ''
+                    if tid:
+                        kwargs['data'] = {tid: raw_result}
             return kwargs
 
         allowed = {
@@ -755,12 +781,25 @@ class Downloader:
                 inspect.Parameter.KEYWORD_ONLY,
             )
         }
-        if raw_result is not None and 'data' in allowed:
-            data = kwargs.get('data')
-            if not isinstance(data, dict):
-                data = {}
+        if raw_result is not None and method_name == 'get_track_credits' and 'data' in allowed:
+            credits_value = Downloader._credits_cache_value(raw_result)
+            if credits_value is not None:
+                data = kwargs.get('data')
+                if not isinstance(data, dict):
+                    data = {}
+                tid = str(fetch_id) if fetch_id is not None else ''
+                if tid and tid not in data:
+                    data = dict(data)
+                    data[tid] = credits_value
+                    kwargs['data'] = data
+        elif raw_result is not None and 'track_data' in allowed and isinstance(raw_result, dict):
+            kwargs['track_data'] = raw_result
+        elif raw_result is not None and 'data' in allowed:
             tid = str(fetch_id) if fetch_id is not None else ''
-            if tid and tid not in data:
+            if tid and tid not in kwargs.get('data', {}):
+                data = kwargs.get('data')
+                if not isinstance(data, dict):
+                    data = {}
                 data = dict(data)
                 data[tid] = raw_result
                 kwargs['data'] = data
