@@ -1309,8 +1309,8 @@ class Downloader:
                         await tidal_rpm.acquire()
                     track_info = await loop.run_in_executor(None, get_track_info_wrapper)
                     track_info = self._ensure_track_info_id(track_info, track_id)
-                    meta_sep = self.global_settings['formatting'].get('metadata_separator', ';')
-                    track_name = f"{meta_sep.join(track_info.artists)} - {track_info.name}"
+                    file_sep = resolve_filename_separator(self.global_settings.get('formatting'))
+                    track_name = f"{file_sep.join(track_info.artists)} - {track_info.name}"
                     self._apply_track_index_to_tags(
                         track_info,
                         args.get('track_index', 0),
@@ -2100,7 +2100,7 @@ class Downloader:
             for k, v in asdict(album_info).items()
         }
         album_tags['id'] = str(album_id)
-        meta_sep = self.global_settings['formatting'].get('metadata_separator', ';')
+        file_sep = resolve_filename_separator(self.global_settings.get('formatting'))
         if album_info.quality:
             q = str(album_info.quality).replace('/', '\u00b7').strip()
             album_tags['quality'] = f'[{sanitise_name(q)}]' if q else ''
@@ -2113,7 +2113,7 @@ class Downloader:
         # Add additional formatting tags if they exist
         aa_formatted = format_album_artist_tag(
             album_info.album_artist or album_info.artist,
-            meta_sep,
+            file_sep,
         )
         if aa_formatted:
             album_tags['album_artist'] = sanitise_name(aa_formatted)
@@ -2216,12 +2216,12 @@ class Downloader:
         track_tags['explicit'] = ' 🅴' if track_info.explicit else ''
         
         # Add commonly used format variables
-        meta_sep = self.global_settings['formatting'].get('metadata_separator', ';')
-        track_tags['artist'] = meta_sep.join([sanitise_name(artist) for artist in track_info.artists]) if track_info.artists else ''
+        file_sep = resolve_filename_separator(self.global_settings.get('formatting'))
+        track_tags['artist'] = file_sep.join([sanitise_name(artist) for artist in track_info.artists]) if track_info.artists else ''
         # Ensure album_artist is a string and falls back to joined track artist if missing
         if track_info.tags.album_artist:
             track_tags['album_artist'] = sanitise_name(
-                format_album_artist_tag(track_info.tags.album_artist, meta_sep)
+                format_album_artist_tag(track_info.tags.album_artist, file_sep)
             )
         else:
             track_tags['album_artist'] = track_tags['artist']
@@ -2239,7 +2239,7 @@ class Downloader:
             match = re.match(r'^\s*(\d{4})', str(track_info.tags.release_date))
             if match:
                 track_tags['release_year'] = match.group(1)
-        track_tags['genres'] = meta_sep.join(map(str, track_info.tags.genres)) if track_info.tags.genres else ''
+        track_tags['genres'] = file_sep.join(map(str, track_info.tags.genres)) if track_info.tags.genres else ''
         
         # Add all documented format variables from GUI with default values
         track_tags['track_number'] = str(track_info.tags.track_number) if track_info.tags.track_number else ''

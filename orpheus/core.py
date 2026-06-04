@@ -54,6 +54,7 @@ class Orpheus:
                 "track_filename_format": "{track_number}. {artist} - {name}",
                 "single_full_path_format": "{artist} - {name}",
                 "metadata_separator": ";",
+                "filename_separator": "",
                 "split_metadata": True,
                 "enable_zfill": True,
                 "force_album_format": False,

@@ -181,6 +181,15 @@ def artists_from_apple_attrs(attrs: dict) -> list[str]:
     return parsed if parsed else ['Unknown Artist']
 
 
+def resolve_filename_separator(formatting: dict | None = None) -> str:
+    """Separator for joining multi-value fields in path/filename templates."""
+    fmt = formatting or {}
+    sep = fmt.get('filename_separator')
+    if sep is None or (isinstance(sep, str) and sep == ''):
+        return fmt.get('metadata_separator', ';')
+    return str(sep)
+
+
 def format_album_artist_tag(artist_data, separator: str = ', ') -> str:
     """Join multiple album artists for embedded metadata display."""
     if isinstance(artist_data, list):

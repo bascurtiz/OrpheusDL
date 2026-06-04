@@ -328,7 +328,7 @@ class AlbumInfo:
     all_track_cover_jpg_url: Optional[str] = None
     animated_cover_url: Optional[str] = None
     description: Optional[str] = None
-    # str or list[str]; list is joined with global formatting.metadata_separator in Downloader
+    # str or list[str]; list is joined with filename_separator (or metadata_separator) for paths, metadata_separator for tags
     album_artist: Optional[Union[str, List[str]]] = None
     label: Optional[str] = None
     catalog_number: Optional[str] = None
