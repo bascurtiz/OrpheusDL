@@ -100,6 +100,92 @@ def get_primary_artist(artist_data):
     return str(artist_data)
 
 
+def _dedupe_artist_names(names: list) -> list[str]:
+    seen = set()
+    out = []
+    for name in names:
+        cleaned = str(name).strip()
+        if not cleaned:
+            continue
+        key = cleaned.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(cleaned)
+    return out
+
+
+def parse_multi_artist_name(artist_name) -> list[str]:
+    """
+    Split a display artist string into individual artists when it lists collaborators.
+
+    Apple Music (and iTunes) join collaborators with " & " (e.g. "Albert King & Stevie Ray Vaughan").
+    Duo or group names such as "Simon & Garfunkel" are kept intact unless both sides look like
+    multi-word names, which indicates separate credited artists rather than a single act.
+    """
+    if artist_name is None:
+        return []
+    if isinstance(artist_name, list):
+        combined = []
+        for item in artist_name:
+            combined.extend(parse_multi_artist_name(item))
+        return _dedupe_artist_names(combined)
+
+    name = str(artist_name).strip()
+    if not name:
+        return []
+
+    if ' & ' not in name:
+        return [name]
+
+    parts = [part.strip() for part in name.split(' & ') if part.strip()]
+    if len(parts) < 2:
+        return [name]
+
+    # "Albert King & Stevie Ray Vaughan" — both sides contain a space.
+    # "Simon & Garfunkel" — neither side contains a space; keep as one artist.
+    if len(parts) > 2 or all(' ' in part for part in parts):
+        return _dedupe_artist_names(parts)
+    return [name]
+
+
+def artists_from_apple_attrs(attrs: dict) -> list[str]:
+    """Build a list of track/album artists from Apple Music catalog attributes."""
+    if not attrs:
+        return ['Unknown Artist']
+
+    raw_names = attrs.get('artistNames')
+    if isinstance(raw_names, list) and raw_names:
+        names = [str(n).strip() for n in raw_names if n and str(n).strip()]
+        if names:
+            return _dedupe_artist_names(names)
+
+    parsed = parse_multi_artist_name(attrs.get('artistName') or attrs.get('name'))
+    return parsed if parsed else ['Unknown Artist']
+
+
+def format_album_artist_tag(artist_data, separator: str = ', ') -> str:
+    """Join multiple album artists for embedded metadata display."""
+    if isinstance(artist_data, list):
+        names = _dedupe_artist_names(artist_data)
+    else:
+        names = parse_multi_artist_name(artist_data)
+    if not names:
+        return ''
+    return separator.join(names) if len(names) > 1 else names[0]
+
+
+def resolve_album_artist_tag(*sources, separator: str = ', ') -> str:
+    """Pick the first usable album-artist source and normalize separators."""
+    for source in sources:
+        if not source:
+            continue
+        formatted = format_album_artist_tag(source, separator=separator)
+        if formatted:
+            return formatted
+    return ''
+
+
 def _truncate_utf8_bytes(value: str, max_bytes: int) -> str:
     """Truncate a string to max UTF-8 bytes without cutting mid-sequence."""
     if max_bytes <= 0:
