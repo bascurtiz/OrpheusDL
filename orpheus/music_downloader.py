@@ -2296,6 +2296,7 @@ class Downloader:
         self.set_indent_number(indent_level)
         d_print = self.oprinter.oprint
         symbols = self._get_status_symbols()
+        self._last_album_download_result = None
 
         if not self._ensure_can_download_or_abort('album', album_id, 'Album'):
             return []
@@ -2527,6 +2528,7 @@ class Downloader:
                     else:
                         track_content_indent = 1
                     download_result = self.download_track(track_id_to_download, album_location=album_path, track_index=index, number_of_tracks=number_of_tracks, main_artist=artist_name, cover_temp_location=cover_temp_location, indent_level=track_content_indent, extra_kwargs=album_info.track_extra_kwargs)
+                    self._last_album_download_result = download_result
                     
                     # Add pause between downloads for Spotify/YouTube to prevent rate limiting
                     # Only pause if track was actually downloaded (not skipped) and not the last track
@@ -2624,7 +2626,7 @@ class Downloader:
             # Pass album_info so download_track can save external album files in the exact resolved track folder.
             single_track_item = album_info.tracks[0]
             track_id_to_download = single_track_item.id if hasattr(single_track_item, 'id') else single_track_item # Check for .id attribute
-            self.download_track(
+            self._last_album_download_result = self.download_track(
                 track_id_to_download,
                 album_location=path,
                 number_of_tracks=1,
@@ -2749,6 +2751,16 @@ class Downloader:
                 indent_level=2,
                 extra_kwargs=artist_info.album_extra_kwargs # General extra_kwargs from artist level
             )
+
+            # Spotify: pause between albums (single-track albums skip the in-album pause loop)
+            if service_name_lower == 'spotify' and index < number_of_albums:
+                if self._handle_spotify_rate_limit_pause(
+                    getattr(self, '_last_album_download_result', None),
+                    index,
+                    number_of_albums,
+                    service_name_override=service_name_lower,
+                ):
+                    print()
 
         self.set_indent_number(2)
         skip_tracks = self.global_settings['artist_downloading']['separate_tracks_skip_downloaded']
