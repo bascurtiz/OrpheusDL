@@ -20,7 +20,7 @@ import mutagen
 
 from utils.exceptions import *
 from utils.models import ContainerEnum, TrackInfo
-from utils.utils import get_primary_artist
+from utils.utils import format_album_artist_tag, get_primary_artist
 
 # Needed for Windows tagging support
 MP4Tags._padding = 0
@@ -161,18 +161,19 @@ def tag_file(file_path: str, image_path: str, track_info: TrackInfo, credits_lis
         tagger['\xa9nam'] = [track_info.name]
         if track_info.album: tagger['\xa9alb'] = [track_info.album]
         if track_info.tags.album_artist:
-            album_artist_display = get_primary_artist(track_info.tags.album_artist)
+            album_artist_display = format_album_artist_tag(track_info.tags.album_artist, metadata_separator)
             tagger['aART'] = [album_artist_display]
         if split_metadata:
             tagger['\xa9ART'] = track_info.artists if isinstance(track_info.artists, list) else [track_info.artists]
         else:
-            tagger['\xa9ART'] = [metadata_separator.join(track_info.artists) if isinstance(track_info.artists, list) else track_info.artists]
+            artist_value = metadata_separator.join(track_info.artists) if isinstance(track_info.artists, list) else track_info.artists
+            tagger['\xa9ART'] = [artist_value]
     else:
         tagger['title'] = track_info.name
         if track_info.album: tagger['album'] = track_info.album
         # Album artist
         if track_info.tags.album_artist:
-            album_artist_display = get_primary_artist(track_info.tags.album_artist)
+            album_artist_display = format_album_artist_tag(track_info.tags.album_artist, metadata_separator)
             
             if container in {ContainerEnum.flac, ContainerEnum.ogg, ContainerEnum.opus, ContainerEnum.webm}:
                 tagger['ALBUMARTIST'] = album_artist_display
@@ -357,7 +358,7 @@ def tag_file(file_path: str, image_path: str, track_info: TrackInfo, credits_lis
                     # Redundant if it matches the album artist exactly OR the track artist list
                     if any(a in credit_names_lower for a in album_artist_lowers) or \
                        credit_names_lower == track_artist_lowers or \
-                       ' & '.join(names).lower() in album_artist_lowers:
+                       metadata_separator.join(names).lower() in album_artist_lowers:
                         credits_to_remove.append(credit_type)
             
             for credit_type in credits_to_remove:

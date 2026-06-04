@@ -1903,12 +1903,12 @@ class Downloader:
         album_tags['name'] = self._compact_path_tag(album_tags.get('name', ''))
         
         # Add additional formatting tags if they exist
-        aa = album_info.album_artist
-        # Keep album_artist compact for folder naming: use the primary artist.
-        # Some providers return very long multi-artist lists which can exceed Windows path limits.
-        primary_album_artist = get_primary_artist(aa)
-        if primary_album_artist:
-            album_tags['album_artist'] = sanitise_name(primary_album_artist)
+        aa_formatted = format_album_artist_tag(
+            album_info.album_artist or album_info.artist,
+            meta_sep,
+        )
+        if aa_formatted:
+            album_tags['album_artist'] = sanitise_name(aa_formatted)
         else:
             album_tags['album_artist'] = album_tags['artist']
         album_tags['label'] = sanitise_name(album_info.label) if album_info.label else ''
@@ -1938,6 +1938,16 @@ class Downloader:
             if disc:
                 totals[disc] = totals.get(disc, 0) + 1
         return totals if len(totals) > 1 else {}
+
+    def _apply_album_context_to_track(self, track_info: TrackInfo, extra_kwargs: dict) -> None:
+        """Keep album artist consistent across every track in an album download."""
+        if not track_info or not getattr(track_info, 'tags', None):
+            return
+        album_artist = (extra_kwargs or {}).get('album_artist')
+        if not album_artist:
+            return
+        meta_sep = self.global_settings['formatting'].get('metadata_separator', ';')
+        track_info.tags.album_artist = format_album_artist_tag(album_artist, meta_sep)
 
     def _apply_track_index_to_tags(self, track_info: TrackInfo, track_index: int, number_of_tracks: int) -> None:
         """Map download index to tags. Playlists/albums can opt into sequential numbering via settings."""
@@ -1989,10 +1999,14 @@ class Downloader:
         
         # Add commonly used format variables
         meta_sep = self.global_settings['formatting'].get('metadata_separator', ';')
-        # Use meta_sep for consistent artist joining in filenames
         track_tags['artist'] = meta_sep.join([sanitise_name(artist) for artist in track_info.artists]) if track_info.artists else ''
         # Ensure album_artist is a string and falls back to joined track artist if missing
-        track_tags['album_artist'] = sanitise_name(get_primary_artist(track_info.tags.album_artist)) if track_info.tags.album_artist else track_tags['artist']
+        if track_info.tags.album_artist:
+            track_tags['album_artist'] = sanitise_name(
+                format_album_artist_tag(track_info.tags.album_artist, meta_sep)
+            )
+        else:
+            track_tags['album_artist'] = track_tags['artist']
         
         # Add commonly used tag fields from track_info.tags
         track_tags['isrc'] = sanitise_name(track_info.tags.isrc) if track_info.tags.isrc else ''
@@ -2932,6 +2946,7 @@ class Downloader:
                 # First get track info
                 track_info = await loop.run_in_executor(None, get_track_info_fallback)
                 track_info = self._ensure_track_info_id(track_info, track_id)
+                self._apply_album_context_to_track(track_info, extra_kwargs)
                 
                 self._apply_track_index_to_tags(track_info, track_index, number_of_tracks)
 
@@ -3295,6 +3310,7 @@ class Downloader:
                 safe_extra_kwargs = extra_kwargs if extra_kwargs is not None else {}
                 track_info = self.service.get_track_info(track_id, quality_tier, codec_options, **safe_extra_kwargs)
                 track_info = self._ensure_track_info_id(track_info, track_id)
+                self._apply_album_context_to_track(track_info, safe_extra_kwargs)
 
                 # If we got track info, break out of retry loop
                 if track_info is not None:
