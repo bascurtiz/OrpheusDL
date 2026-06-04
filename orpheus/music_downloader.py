@@ -318,6 +318,20 @@ class Downloader:
         self._download_error_log_context = None
         self._download_error_count = 0
 
+    def _skip_existing_files_enabled(self) -> bool:
+        """When True, skip tracks whose target file already exists."""
+        return bool(self.global_settings.get('advanced', {}).get('ignore_existing_files', False))
+
+    def _prepare_track_download_path(self, track_location: str) -> None:
+        """Remove an existing track file so a fresh download can overwrite it."""
+        if self._skip_existing_files_enabled():
+            return
+        try:
+            if track_location and os.path.isfile(track_location):
+                os.remove(track_location)
+        except OSError:
+            pass
+
     def _normalize_error_log_dir(self, output_dir: str) -> str:
         if not output_dir:
             output_dir = self.path or '.'
@@ -1103,7 +1117,7 @@ class Downloader:
                     )
                     
                     # Check if file already exists BEFORE getting download info (for temp file modules like Deezer)
-                    if track_info:
+                    if self._skip_existing_files_enabled() and track_info:
                         track_location = self._create_track_location(args.get('album_location', ''), track_info)
                         if await loop.run_in_executor(None, os.path.isfile, track_location):
                             return (index, track_name, "SKIPPED", None, None, 0, 0)
@@ -2793,7 +2807,7 @@ class Downloader:
             loop = asyncio.get_event_loop()
                 
             # Check if track already exists
-            if album_location == '' and await loop.run_in_executor(None, os.path.isfile, track_id):
+            if self._skip_existing_files_enabled() and album_location == '' and await loop.run_in_executor(None, os.path.isfile, track_id):
                 return None
                 
             # Get track info and download info (fallback - should not be used in optimized path)
@@ -2829,7 +2843,7 @@ class Downloader:
                 self._apply_track_index_to_tags(track_info, track_index, number_of_tracks)
 
                 # Check if file already exists BEFORE getting download info (for temp file modules like Deezer)
-                if track_info:
+                if self._skip_existing_files_enabled() and track_info:
                     track_location = self._create_track_location(album_location, track_info)
                     if await loop.run_in_executor(None, os.path.isfile, track_location):
                         return "ALREADY_EXISTS"
@@ -2850,7 +2864,7 @@ class Downloader:
             
         # Check if track already exists (for backward compatibility) - use thread pool for file checks
         loop = asyncio.get_event_loop()
-        if album_location == '' and await loop.run_in_executor(None, os.path.isfile, track_id):
+        if self._skip_existing_files_enabled() and album_location == '' and await loop.run_in_executor(None, os.path.isfile, track_id):
             return "ALREADY_EXISTS"
             
         # Create track location (use different_codec if module converted e.g. Tidal Atmos -> FLAC)
@@ -2864,8 +2878,11 @@ class Downloader:
             await loop.run_in_executor(None, lambda: os.makedirs(track_parent_dir, exist_ok=True))
 
         # Check if file already exists - use thread pool for file checks
-        if await loop.run_in_executor(None, os.path.isfile, track_location):
+        if self._skip_existing_files_enabled() and await loop.run_in_executor(None, os.path.isfile, track_location):
             return "ALREADY_EXISTS"
+
+        if not self._skip_existing_files_enabled():
+            await loop.run_in_executor(None, self._prepare_track_download_path, track_location)
             
         # Download the audio file
         try:
@@ -2876,7 +2893,8 @@ class Downloader:
                     track_location,
                     headers=download_info.file_url_headers,
                     enable_progress_bar=False,  # Disable progress bar for concurrent downloads
-                    indent_level=0
+                    indent_level=0,
+                    skip_if_exists=self._skip_existing_files_enabled(),
                 )
                 # Extract file location and bytes downloaded
                 if isinstance(result_tuple, tuple):
@@ -2888,6 +2906,7 @@ class Downloader:
             else:
                 # For non-URL downloads, fall back to synchronous method using thread pool
                 loop = asyncio.get_event_loop()
+                await loop.run_in_executor(None, self._prepare_track_download_path, track_location)
                 final_location = await loop.run_in_executor(None, shutil.move, download_info.temp_file_path, track_location)
                 # Get file size for non-URL downloads using thread pool
                 try:
@@ -3384,7 +3403,7 @@ class Downloader:
             self._download_album_files(single_album_path, album_info_for_single)
 
 
-        if os.path.exists(track_location):
+        if self._skip_existing_files_enabled() and os.path.exists(track_location):
             d_print(f'Track file already exists')
             
             # Restore original indent level if it was adjusted before printing completion message
@@ -3395,7 +3414,6 @@ class Downloader:
             d_print(f'=== {symbols["skip"]} Track skipped ===', drop_level=header_drop_level)
 
             return return_with_blank_line("SKIPPED")
-
 
         # Audio is downloaded below - lyrics now handled after tagging to ensure they are fetched
 
@@ -3583,13 +3601,15 @@ class Downloader:
         # Use actual container when module converts (e.g. Tidal Atmos AC4 -> FLAC)
         if getattr(download_info, 'different_codec', None):
             track_location = self._create_track_location(album_location, track_info, override_codec=download_info.different_codec)
-            if os.path.exists(track_location):
+            if self._skip_existing_files_enabled() and os.path.exists(track_location):
                 d_print(f'Track file already exists')
                 if details_indent_adjustment != 0:
                     self.set_indent_number(indent_level)
                 symbols = self._get_status_symbols()
                 d_print(f'=== {symbols["skip"]} Track skipped ===', drop_level=header_drop_level)
                 return return_with_blank_line("SKIPPED")
+
+        self._prepare_track_download_path(track_location)
 
         d_print('Downloading audio...')
         try:
@@ -3598,7 +3618,8 @@ class Downloader:
                 track_location,
                 headers=download_info.file_url_headers,
                 enable_progress_bar=self.global_settings['general'].get('progress_bar', False) and verbose,
-                indent_level=self.indent_number
+                indent_level=self.indent_number,
+                skip_if_exists=self._skip_existing_files_enabled(),
             ) if download_info.download_type is DownloadEnum.URL else shutil.move(download_info.temp_file_path, track_location)
             
             

@@ -145,9 +145,9 @@ def fix_byte_limit(path: str, byte_limit=250):
 
 r_session = create_requests_session()
 
-async def download_file_async(session, url, file_location, headers={}, enable_progress_bar=False, indent_level=0, artwork_settings=None, max_retries=3):
+async def download_file_async(session, url, file_location, headers={}, enable_progress_bar=False, indent_level=0, artwork_settings=None, max_retries=3, skip_if_exists=True):
     """Async version of download_file using aiohttp - returns (file_location, bytes_downloaded)"""
-    if os.path.isfile(file_location):
+    if skip_if_exists and os.path.isfile(file_location):
         # File already exists - return 0 bytes downloaded
         return (file_location, 0)
 
@@ -248,9 +248,9 @@ async def download_file_async(session, url, file_location, headers={}, enable_pr
                 silentremove(file_location)
             raise KeyboardInterrupt
 
-def download_file(url, file_location, headers={}, enable_progress_bar=False, indent_level=0, artwork_settings=None):
+def download_file(url, file_location, headers={}, enable_progress_bar=False, indent_level=0, artwork_settings=None, skip_if_exists=True):
     """Synchronous wrapper for the async download function for backward compatibility"""
-    if os.path.isfile(file_location):
+    if skip_if_exists and os.path.isfile(file_location):
         return None
 
     # Create directory structure if it doesn't exist
