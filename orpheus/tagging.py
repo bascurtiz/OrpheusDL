@@ -20,7 +20,7 @@ import mutagen
 
 from utils.exceptions import *
 from utils.models import ContainerEnum, TrackInfo
-from utils.utils import format_album_artist_tag, get_primary_artist
+from utils.utils import format_album_artist_tag, get_primary_artist, zfill_number
 
 # Needed for Windows tagging support
 MP4Tags._padding = 0
@@ -106,7 +106,7 @@ def _ogg_tags_appear_written(file_path: str) -> bool:
         return False
 
 
-def tag_file(file_path: str, image_path: str, track_info: TrackInfo, credits_list: list, embedded_lyrics: str, container: ContainerEnum, metadata_separator: str = ';', split_metadata: bool = True, _repair_retry: bool = False):
+def tag_file(file_path: str, image_path: str, track_info: TrackInfo, credits_list: list, embedded_lyrics: str, container: ContainerEnum, metadata_separator: str = ';', split_metadata: bool = True, enable_zfill: bool = False, _repair_retry: bool = False):
     if container == ContainerEnum.flac:
         tagger = FLAC(file_path)
     elif container == ContainerEnum.opus:
@@ -185,30 +185,49 @@ def tag_file(file_path: str, image_path: str, track_info: TrackInfo, credits_lis
         else:
             tagger['artist'] = metadata_separator.join(track_info.artists) if isinstance(track_info.artists, list) else track_info.artists
 
-    if container == ContainerEnum.m4a or container == ContainerEnum.mp4:
-        # MP4 uses tuple format: [(track_number, total_tracks)]
-        tn = track_info.tags.track_number or 0
-        tt = track_info.tags.total_tracks or 0
-        if tn or tt:
-            tagger['trkn'] = [(tn, tt)]
-        dn = track_info.tags.disc_number or 0
-        dt = track_info.tags.total_discs or 0
-        if dn or dt:
-            tagger['disk'] = [(dn, dt)]
-    elif container == ContainerEnum.mp3:
-        if track_info.tags.track_number and track_info.tags.total_tracks:
-            tagger['tracknumber'] = str(track_info.tags.track_number) + '/' + str(track_info.tags.total_tracks)
-        elif track_info.tags.track_number:
-            tagger['tracknumber'] = str(track_info.tags.track_number)
-        if track_info.tags.disc_number and track_info.tags.total_discs:
-            tagger['discnumber'] = str(track_info.tags.disc_number) + '/' + str(track_info.tags.total_discs)
-        elif track_info.tags.disc_number:
-            tagger['discnumber'] = str(track_info.tags.disc_number)
+    tn = track_info.tags.track_number
+    tt = track_info.tags.total_tracks
+    dn = track_info.tags.disc_number
+    dt = track_info.tags.total_discs
+    if enable_zfill:
+        tn_display = zfill_number(tn, tt) if tn else ''
+        tt_display = zfill_number(tt, tt) if tt else ''
+        dn_display = zfill_number(dn, dt) if dn else ''
+        dt_display = zfill_number(dt, dt) if dt else ''
     else:
-        if track_info.tags.track_number: tagger['tracknumber'] = str(track_info.tags.track_number)
-        if track_info.tags.disc_number: tagger['discnumber'] = str(track_info.tags.disc_number)
-        if track_info.tags.total_tracks: tagger['totaltracks'] = str(track_info.tags.total_tracks)
-        if track_info.tags.total_discs: tagger['totaldiscs'] = str(track_info.tags.total_discs)
+        tn_display = str(tn) if tn else ''
+        tt_display = str(tt) if tt else ''
+        dn_display = str(dn) if dn else ''
+        dt_display = str(dt) if dt else ''
+
+    if container == ContainerEnum.m4a or container == ContainerEnum.mp4:
+        # MP4 uses integer tuple atoms: [(track_number, total_tracks)]
+        tn_int = int(tn) if tn else 0
+        tt_int = int(tt) if tt else 0
+        if tn_int or tt_int:
+            tagger['trkn'] = [(tn_int, tt_int)]
+        dn_int = int(dn) if dn else 0
+        dt_int = int(dt) if dt else 0
+        if dn_int or dt_int:
+            tagger['disk'] = [(dn_int, dt_int)]
+    elif container == ContainerEnum.mp3:
+        if tn_display and tt_display:
+            tagger['tracknumber'] = f'{tn_display}/{tt_display}'
+        elif tn_display:
+            tagger['tracknumber'] = tn_display
+        if dn_display and dt_display:
+            tagger['discnumber'] = f'{dn_display}/{dt_display}'
+        elif dn_display:
+            tagger['discnumber'] = dn_display
+    else:
+        if tn_display:
+            tagger['tracknumber'] = tn_display
+        if dn_display:
+            tagger['discnumber'] = dn_display
+        if tt_display:
+            tagger['totaltracks'] = tt_display
+        if dt_display:
+            tagger['totaldiscs'] = dt_display
 
     if container == ContainerEnum.m4a or container == ContainerEnum.mp4:
         if track_info.tags.release_date:
@@ -535,6 +554,7 @@ def tag_file(file_path: str, image_path: str, track_info: TrackInfo, credits_lis
                         container=container,
                         metadata_separator=metadata_separator,
                         split_metadata=split_metadata,
+                        enable_zfill=enable_zfill,
                         _repair_retry=True
                     )
                 if _ogg_tags_appear_written(file_path):

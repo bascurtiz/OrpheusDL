@@ -150,8 +150,9 @@ art are stored here. May have slashes in it, for instance {artist}/{album}.
 `single_full_path_format`: How singles are handled, which is separate to how the above work.
 Instead, this has both the folder's name and the track's name.
 
-`enable_zfill`: Enables zero padding for `track_number`, `total_tracks`, `disc_number`, `total_discs` if the
-corresponding number has more than 2 digits
+`enable_zfill`: Zero-pads `track_number`, `total_tracks`, `disc_number`, and `total_discs` in filenames and
+embedded metadata (minimum two digits, e.g. 01–09; wider padding when an album has 100+ tracks). Use
+`{track_number}` or `{disc_number}` in `track_filename_format` for padded filenames.
 
 `force_album_format`: Forces the `album_format` for tracks instead of the `single_full_path_format` and also
 uses `album_format` in the `playlist_format` folder 

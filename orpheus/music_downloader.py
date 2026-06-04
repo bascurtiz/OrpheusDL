@@ -2115,8 +2115,7 @@ class Downloader:
         playlist_pos_str = str(playlist_pos) if playlist_pos else ''
         if playlist_pos and self.global_settings['formatting']['enable_zfill']:
             playlist_total = (track_info.tags.extra_tags or {}).get('_playlist_total_tracks')
-            if playlist_total:
-                playlist_pos_str = str(playlist_pos).zfill(len(str(playlist_total)))
+            playlist_pos_str = zfill_number(playlist_pos, playlist_total)
         track_tags['playlist_position'] = playlist_pos_str
         track_tags['disc_number'] = str(track_info.tags.disc_number) if track_info.tags.disc_number else ''
         track_tags['total_discs'] = str(track_info.tags.total_discs) if track_info.tags.total_discs else ''
@@ -2138,12 +2137,22 @@ class Downloader:
         
         # Handle track/disc number formatting with zero-fill if enabled
         if self.global_settings['formatting']['enable_zfill']:
-            if track_info.tags.track_number and track_info.tags.total_tracks:
-                total_digits = len(str(track_info.tags.total_tracks))
-                track_tags['track_number'] = str(track_info.tags.track_number).zfill(total_digits)
-            if track_info.tags.disc_number and track_info.tags.total_discs:
-                total_digits = len(str(track_info.tags.total_discs))
-                track_tags['disc_number'] = str(track_info.tags.disc_number).zfill(total_digits)
+            if track_info.tags.track_number:
+                track_tags['track_number'] = zfill_number(
+                    track_info.tags.track_number, track_info.tags.total_tracks
+                )
+            if track_info.tags.disc_number:
+                track_tags['disc_number'] = zfill_number(
+                    track_info.tags.disc_number, track_info.tags.total_discs
+                )
+            if track_info.tags.total_tracks:
+                track_tags['total_tracks'] = zfill_number(
+                    track_info.tags.total_tracks, track_info.tags.total_tracks
+                )
+            if track_info.tags.total_discs:
+                track_tags['total_discs'] = zfill_number(
+                    track_info.tags.total_discs, track_info.tags.total_discs
+                )
         
         # Get the appropriate format string
         # Better detection for single track downloads
@@ -3218,7 +3227,8 @@ class Downloader:
                 embed_artwork_path = artwork_path if self.global_settings['covers']['embed_cover'] else None
                 meta_sep = self.global_settings['formatting'].get('metadata_separator', ';')
                 split_meta = self.global_settings['formatting'].get('split_metadata', True)
-                tag_file(final_location, embed_artwork_path, track_info, credits_list, embedded_lyrics, container, metadata_separator=meta_sep, split_metadata=split_meta)
+                enable_zfill = self.global_settings['formatting'].get('enable_zfill', False)
+                tag_file(final_location, embed_artwork_path, track_info, credits_list, embedded_lyrics, container, metadata_separator=meta_sep, split_metadata=split_meta, enable_zfill=enable_zfill)
             else:
                 pass  # Skip tagging for unsupported containers like WAV
 
@@ -3243,7 +3253,7 @@ class Downloader:
                     embed_artwork_path = artwork_path if self.global_settings['covers']['embed_cover'] else None
                     meta_sep = self.global_settings['formatting'].get('metadata_separator', ';')
                     split_meta = self.global_settings['formatting'].get('split_metadata', True)
-                    tag_file(old_track_location, embed_artwork_path, track_info, credits_list, embedded_lyrics, old_container, metadata_separator=meta_sep, split_metadata=split_meta)
+                    tag_file(old_track_location, embed_artwork_path, track_info, credits_list, embedded_lyrics, old_container, metadata_separator=meta_sep, split_metadata=split_meta, enable_zfill=enable_zfill)
                 else:
                     pass  # Skip tagging for unsupported containers
             
@@ -3932,7 +3942,8 @@ class Downloader:
                 embed_artwork_path = artwork_path if self.global_settings['covers']['embed_cover'] else None
                 meta_sep = self.global_settings['formatting'].get('metadata_separator', ';')
                 split_meta = self.global_settings['formatting'].get('split_metadata', True)
-                tag_file(final_location, embed_artwork_path, track_info, credits_list, embedded_lyrics, container, metadata_separator=meta_sep, split_metadata=split_meta)
+                enable_zfill = self.global_settings['formatting'].get('enable_zfill', False)
+                tag_file(final_location, embed_artwork_path, track_info, credits_list, embedded_lyrics, container, metadata_separator=meta_sep, split_metadata=split_meta, enable_zfill=enable_zfill)
             else:
                 pass  # Skip tagging for unsupported containers like WAV
 
@@ -3955,7 +3966,7 @@ class Downloader:
                     embed_artwork_path = artwork_path if self.global_settings['covers']['embed_cover'] else None
                     meta_sep = self.global_settings['formatting'].get('metadata_separator', ';')
                     split_meta = self.global_settings['formatting'].get('split_metadata', True)
-                    tag_file(old_track_location, embed_artwork_path, track_info, credits_list, embedded_lyrics, old_container, metadata_separator=meta_sep, split_metadata=split_meta)
+                    tag_file(old_track_location, embed_artwork_path, track_info, credits_list, embedded_lyrics, old_container, metadata_separator=meta_sep, split_metadata=split_meta, enable_zfill=enable_zfill)
                 else:
                     pass  # Skip tagging for unsupported containers
             

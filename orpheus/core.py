@@ -51,7 +51,7 @@ class Orpheus:
                 "discography_format": "{name}{quality}",
                 "album_format": "{artist}/{name}",
                 "playlist_format": "{name}",
-                "track_filename_format": "{artist} - {name}",
+                "track_filename_format": "{track_number}. {artist} - {name}",
                 "single_full_path_format": "{artist} - {name}",
                 "metadata_separator": ";",
                 "split_metadata": True,

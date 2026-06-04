@@ -77,6 +77,23 @@ def sanitise_name(name):
     return s
 
 
+def zfill_number(value, total=None, min_digits=2):
+    """Zero-pad a track/disc index for filenames and metadata (minimum two digits)."""
+    if value is None or value == '':
+        return ''
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return str(value)
+    width = min_digits
+    if total is not None and total != '':
+        try:
+            width = max(min_digits, len(str(int(total))))
+        except (TypeError, ValueError):
+            pass
+    return str(n).zfill(width)
+
+
 def get_primary_artist(artist_data):
     """
     Extract only the primary (first) artist from a list or a string with separators.
