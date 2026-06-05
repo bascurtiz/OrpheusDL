@@ -319,6 +319,9 @@ class Downloader:
         self._download_error_log_context = None
         self._download_error_count = 0
         self._discography_album_path_registry = {}
+        # Album-level metadata reference, set during an album download when the
+        # 'force_album_metadata' setting is on (keeps COPYRIGHT/LABEL identical per album).
+        self._album_level_metadata = None
 
     def _skip_existing_files_enabled(self) -> bool:
         """When True, skip tracks whose target file already exists."""
@@ -923,7 +926,87 @@ class Downloader:
             if score > best_score:
                 best_score = score
                 best = label
-        return best
+        # Render the chosen label with its icon so folder names match the search/quality display.
+        display_map = {
+            'ATMOS': '◗◖ ATMOS',
+            '360RA': '360 Reality Audio',
+            'IMMERSIVE': 'Immersive Audio',
+            'HI-RES': '🅷 HI-RES',
+            'FLAC': 'FLAC',
+            'OPUS': 'OPUS',
+        }
+        return sanitise_name(display_map.get(best.upper(), best))
+
+    @staticmethod
+    def _quality_path_label(quality_source) -> str:
+        """
+        Icon-badged, path-safe quality label for the {quality} folder tag.
+
+        Prefers catalog/search labels like "🅷 HI-RES" / "◗◖ ATMOS" over bare codec
+        strings (e.g. Tidal reports "FLAC" for Hi-Res albums).
+        """
+        if not quality_source:
+            return ''
+        text = str(quality_source).strip()
+        if not text:
+            return ''
+        labels = []
+        seen = set()
+        for part in (Downloader._album_quality_text_parts(text) or [text]):
+            pu = part.upper()
+            if 'ATMOS' in pu or '◗◖' in part:
+                label = '◗◖ ATMOS'
+            elif re.search(r'HI[\s\-_]*RES', pu) or '🅷' in part or 'ʜɪ' in part.lower():
+                label = '🅷 HI-RES'
+            elif '360' in pu and ('REALITY' in pu or 'RA' in pu):
+                label = '360 Reality Audio'
+            elif 'IMMERSIVE' in pu:
+                label = 'Immersive Audio'
+            elif 'FLAC' in pu:
+                label = 'FLAC'
+            elif 'OPUS' in pu:
+                label = 'OPUS'
+            else:
+                label = part.strip()
+            key = label.lower()
+            if label and key not in seen:
+                seen.add(key)
+                labels.append(label)
+        return sanitise_name(' '.join(labels))
+
+    # kwargs the GUI attaches for display/logging only — never valid module info-method args
+    _DISPLAY_ONLY_KWARGS = ('catalog_quality', 'display_quality')
+
+    @staticmethod
+    def _filter_kwargs_for_method(method, kwargs) -> dict:
+        """
+        Drop GUI-only display kwargs (and any params the module's method can't accept)
+        before calling get_album_info / get_track_info / get_playlist_info.
+
+        Modules that accept **kwargs receive everything except the display-only keys.
+        """
+        if not kwargs:
+            return {}
+        cleaned = {
+            k: v for k, v in kwargs.items()
+            if k not in Downloader._DISPLAY_ONLY_KWARGS
+        }
+        try:
+            sig = inspect.signature(method)
+        except (TypeError, ValueError):
+            return cleaned
+        params = sig.parameters.values()
+        if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params):
+            return cleaned
+        allowed = {
+            name for name, p in sig.parameters.items()
+            if name != 'self'
+            and p.kind in (
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY,
+            )
+        }
+        return {k: v for k, v in cleaned.items() if k in allowed}
 
     def _get_display_quality(self, extra_kwargs=None, album_info=None):
         """Human-readable quality shown in logs (album/catalog first, then overrides, then global tier)."""
@@ -1634,6 +1717,11 @@ class Downloader:
         if extra_kwargs:
             kwargs_for_playlist_info.update(extra_kwargs)
 
+        # Strip GUI-only display kwargs (e.g. catalog_quality) the module's signature can't accept
+        kwargs_for_playlist_info = self._filter_kwargs_for_method(
+            self.service.get_playlist_info, kwargs_for_playlist_info
+        )
+
         if service_name_lower in ['beatport', 'beatsource']:
             if 'data' in kwargs_for_playlist_info:
                 logging.debug(f"Removing 'data' from extra_kwargs for {self.service_name}.get_playlist_info as it is unexpected.")
@@ -2045,6 +2133,7 @@ class Downloader:
         base_path: str,
         album_id: str,
         album_info: AlbumInfo,
+        quality_source: str = '',
     ) -> str:
         """Use a distinct folder when multiple catalog albums share the same formatted name."""
         registry = self._discography_album_path_registry
@@ -2058,8 +2147,9 @@ class Downloader:
             return album_path
 
         suffixes = []
-        if album_info and album_info.quality:
-            quality_suffix = self._album_quality_folder_suffix(album_info.quality)
+        quality_for_suffix = quality_source or (album_info.quality if album_info else '')
+        if quality_for_suffix:
+            quality_suffix = self._album_quality_folder_suffix(quality_for_suffix)
             if quality_suffix:
                 suffixes.append(quality_suffix)
         if album_info and album_info.catalog_number:
@@ -2067,7 +2157,8 @@ class Downloader:
         suffixes.append(album_id_str)
 
         for suffix in suffixes:
-            extra = sanitise_name(f' [{suffix}]')
+            # sanitise only the suffix text — keep the separating space (sanitise_name strips it)
+            extra = ' [' + sanitise_name(str(suffix)) + ']'
             candidate_name = (album_path_formatted_name + extra).strip()
             candidate_raw = os.path.join(base_path, candidate_name)
             candidate = fix_byte_limit(candidate_raw) + '/'
@@ -2087,12 +2178,26 @@ class Downloader:
         registry[norm_key] = album_id_str
         return album_path
 
+    def _resolve_album_quality_source(self, album_info: AlbumInfo, extra_kwargs=None) -> str:
+        """
+        Best available quality string for folder naming.
+
+        Prefers the catalog/search label (e.g. "🅷 HI-RES") since modules often report a
+        bare codec like "FLAC" for Hi-Res albums.
+        """
+        if isinstance(extra_kwargs, dict):
+            catalog = extra_kwargs.get('catalog_quality') or extra_kwargs.get('display_quality')
+            if catalog:
+                return str(catalog)
+        return str(album_info.quality) if album_info and album_info.quality else ''
+
     def _create_album_location(
         self,
         path: str,
         album_id: str,
         album_info: AlbumInfo,
         use_discography_format: bool = False,
+        extra_kwargs=None,
     ) -> str:
         # Clean up album tags and add special explicit and additional formats
         album_tags = {
@@ -2101,11 +2206,9 @@ class Downloader:
         }
         album_tags['id'] = str(album_id)
         file_sep = resolve_filename_separator(self.global_settings.get('formatting'))
-        if album_info.quality:
-            q = str(album_info.quality).replace('/', '\u00b7').strip()
-            album_tags['quality'] = f'[{sanitise_name(q)}]' if q else ''
-        else:
-            album_tags['quality'] = ''
+        quality_source = self._resolve_album_quality_source(album_info, extra_kwargs)
+        quality_label = self._quality_path_label(quality_source)
+        album_tags['quality'] = f'[{quality_label}]' if quality_label else ''
         album_tags['explicit'] = ' 🅴' if album_info.explicit else ''
         album_tags['artist_initials'] = self._get_artist_initials_from_name(album_info)
         album_tags['name'] = self._compact_path_tag(album_tags.get('name', ''))
@@ -2143,6 +2246,7 @@ class Downloader:
             path,
             album_id,
             album_info,
+            quality_source=quality_source,
         )
 
         return album_path
@@ -2166,6 +2270,63 @@ class Downloader:
             return
         meta_sep = self.global_settings['formatting'].get('metadata_separator', ';')
         track_info.tags.album_artist = format_album_artist_tag(album_artist, meta_sep)
+
+    def _force_album_metadata_enabled(self) -> bool:
+        return bool(self.global_settings.get('advanced', {}).get('force_album_metadata', False))
+
+    def _build_album_level_metadata(self, album_info: AlbumInfo) -> dict:
+        """
+        Reference values used to keep album-level tags identical across every track.
+
+        Fields the album carries (label, catalog_number, upc) come straight from album_info;
+        copyright/label without an album-level source are captured from the first track and
+        reused for the rest (stored in '_captured').
+        """
+        meta_sep = self.global_settings['formatting'].get('metadata_separator', ';')
+        album_label = album_info.label if album_info else None
+        if isinstance(album_label, (list, tuple)):
+            album_label = meta_sep.join(str(x) for x in album_label if x)
+        return {
+            'label': str(album_label) if album_label else '',
+            'catalog_number': str(album_info.catalog_number) if album_info and album_info.catalog_number else '',
+            'upc': str(album_info.upc) if album_info and album_info.upc else '',
+            '_captured': {},
+        }
+
+    def _apply_album_level_metadata_to_track(self, track_info: TrackInfo) -> None:
+        """Force album-level tags (COPYRIGHT, LABEL, catalog number, UPC) to be uniform per album."""
+        meta = getattr(self, '_album_level_metadata', None)
+        if not meta:
+            return
+        # Only ever applies inside album/artist downloads — never standalone tracks or playlists.
+        if self.download_mode not in (DownloadTypeEnum.album, DownloadTypeEnum.artist):
+            return
+        tags = getattr(track_info, 'tags', None)
+        if tags is None:
+            return
+        captured = meta['_captured']
+
+        def _resolve(field_name, album_value):
+            if album_value:
+                return album_value
+            current = getattr(tags, field_name, None)
+            if current:
+                captured.setdefault(field_name, current)
+            return captured.get(field_name)
+
+        label = _resolve('label', meta.get('label'))
+        if label:
+            tags.label = label
+        catalog_number = _resolve('catalog_number', meta.get('catalog_number'))
+        if catalog_number:
+            tags.catalog_number = catalog_number
+        upc = _resolve('upc', meta.get('upc'))
+        if upc:
+            tags.upc = upc
+        # Album has no copyright field — capture the first track's value and reuse for all.
+        copyright_value = _resolve('copyright', '')
+        if copyright_value:
+            tags.copyright = copyright_value
 
     def _apply_track_index_to_tags(self, track_info: TrackInfo, track_index: int, number_of_tracks: int) -> None:
         """Map download index to tags. Playlists/albums can opt into sequential numbering via settings."""
@@ -2434,11 +2595,15 @@ class Downloader:
         if not self._ensure_can_download_or_abort('album', album_id, 'Album'):
             return []
 
+        # Reset any leftover album-level metadata reference from a previous album
+        self._album_level_metadata = None
+
         # Get album info - use indent level 1 to match album details
         self.set_indent_number(1)
         self.print(f'Fetching data. Please wait...')
         try:
-            album_info: AlbumInfo = self.service.get_album_info(album_id, **(extra_kwargs or {}))
+            album_info_kwargs = self._filter_kwargs_for_method(self.service.get_album_info, extra_kwargs)
+            album_info: AlbumInfo = self.service.get_album_info(album_id, **album_info_kwargs)
         except Exception as e:
             if isinstance(e, SpotifyConfigError):
                 raise
@@ -2464,8 +2629,13 @@ class Downloader:
         if number_of_tracks > 1 or self.global_settings['formatting']['force_album_format']:
             # Creates the album_location folders
             album_path = self._create_album_location(
-                path, album_id, album_info, use_discography_format=use_discography_format
+                path, album_id, album_info,
+                use_discography_format=use_discography_format,
+                extra_kwargs=extra_kwargs,
             )
+
+            if self._force_album_metadata_enabled():
+                self._album_level_metadata = self._build_album_level_metadata(album_info)
 
             self._init_download_error_log(album_path, 'album', album_info.name, album_id)
             catalog_exclusions = self._resolve_album_catalog_exclusions(album_info)
@@ -3363,6 +3533,9 @@ class Downloader:
             
             # Get credits list (populated by _fetch_metadata if found)
             credits_list = getattr(track_info, 'credits_list', [])
+
+            # Force album-level tags (COPYRIGHT, LABEL, catalog/UPC) uniform across the album when enabled
+            self._apply_album_level_metadata_to_track(track_info)
             
             # Check if container supports tagging
             tagging_supported_containers = [ContainerEnum.flac, ContainerEnum.mp3, ContainerEnum.m4a, ContainerEnum.ogg, ContainerEnum.opus, ContainerEnum.webm]
@@ -3553,7 +3726,8 @@ class Downloader:
             try:
                 # Ensure extra_kwargs is always a dictionary
                 safe_extra_kwargs = extra_kwargs if extra_kwargs is not None else {}
-                track_info = self.service.get_track_info(track_id, quality_tier, codec_options, **safe_extra_kwargs)
+                track_info_kwargs = self._filter_kwargs_for_method(self.service.get_track_info, safe_extra_kwargs)
+                track_info = self.service.get_track_info(track_id, quality_tier, codec_options, **track_info_kwargs)
                 track_info = self._ensure_track_info_id(track_info, track_id)
                 self._apply_album_context_to_track(track_info, safe_extra_kwargs)
 
@@ -3780,7 +3954,8 @@ class Downloader:
                 # Try the full signature first (for modules that support it)
                 # Ensure extra_kwargs is always a dictionary
                 safe_extra_kwargs = extra_kwargs if extra_kwargs is not None else {}
-                download_info: TrackDownloadInfo = self.service.get_track_download(track_id, quality_tier, codec_options, **safe_extra_kwargs)
+                download_kwargs = self._filter_kwargs_for_method(self.service.get_track_download, safe_extra_kwargs)
+                download_info: TrackDownloadInfo = self.service.get_track_download(track_id, quality_tier, codec_options, **download_kwargs)
         except SpotifyRateLimitDetectedError as e:
             d_print(f'Rate limit detected for {display_track_id}')
             symbols = self._get_status_symbols()
@@ -4078,6 +4253,9 @@ class Downloader:
             
             # Get credits list (populated by _fetch_metadata if found)
             credits_list = getattr(track_info, 'credits_list', [])
+
+            # Force album-level tags (COPYRIGHT, LABEL, catalog/UPC) uniform across the album when enabled
+            self._apply_album_level_metadata_to_track(track_info)
             
             # Check if container supports tagging
             tagging_supported_containers = [ContainerEnum.flac, ContainerEnum.mp3, ContainerEnum.m4a, ContainerEnum.ogg, ContainerEnum.opus, ContainerEnum.webm]
