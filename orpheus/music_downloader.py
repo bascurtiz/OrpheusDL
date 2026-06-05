@@ -319,9 +319,6 @@ class Downloader:
         self._download_error_log_context = None
         self._download_error_count = 0
         self._discography_album_path_registry = {}
-        # Album-level metadata reference, set during an album download when the
-        # 'force_album_metadata' setting is on (keeps COPYRIGHT/LABEL identical per album).
-        self._album_level_metadata = None
 
     def _skip_existing_files_enabled(self) -> bool:
         """When True, skip tracks whose target file already exists."""
@@ -1402,7 +1399,7 @@ class Downloader:
                     
                     # Check if file already exists BEFORE getting download info (for temp file modules like Deezer)
                     if self._skip_existing_files_enabled() and track_info:
-                        track_location = self._create_track_location(args.get('album_location', ''), track_info)
+                        track_location = self._create_track_location(args.get('album_location', ''), track_info, extra_kwargs=args.get('extra_kwargs', {}))
                         if await loop.run_in_executor(None, os.path.isfile, track_location):
                             return (index, track_name, "SKIPPED", None, None, 0, 0)
                     
@@ -2271,63 +2268,6 @@ class Downloader:
         meta_sep = self.global_settings['formatting'].get('metadata_separator', ';')
         track_info.tags.album_artist = format_album_artist_tag(album_artist, meta_sep)
 
-    def _force_album_metadata_enabled(self) -> bool:
-        return bool(self.global_settings.get('advanced', {}).get('force_album_metadata', False))
-
-    def _build_album_level_metadata(self, album_info: AlbumInfo) -> dict:
-        """
-        Reference values used to keep album-level tags identical across every track.
-
-        Fields the album carries (label, catalog_number, upc) come straight from album_info;
-        copyright/label without an album-level source are captured from the first track and
-        reused for the rest (stored in '_captured').
-        """
-        meta_sep = self.global_settings['formatting'].get('metadata_separator', ';')
-        album_label = album_info.label if album_info else None
-        if isinstance(album_label, (list, tuple)):
-            album_label = meta_sep.join(str(x) for x in album_label if x)
-        return {
-            'label': str(album_label) if album_label else '',
-            'catalog_number': str(album_info.catalog_number) if album_info and album_info.catalog_number else '',
-            'upc': str(album_info.upc) if album_info and album_info.upc else '',
-            '_captured': {},
-        }
-
-    def _apply_album_level_metadata_to_track(self, track_info: TrackInfo) -> None:
-        """Force album-level tags (COPYRIGHT, LABEL, catalog number, UPC) to be uniform per album."""
-        meta = getattr(self, '_album_level_metadata', None)
-        if not meta:
-            return
-        # Only ever applies inside album/artist downloads — never standalone tracks or playlists.
-        if self.download_mode not in (DownloadTypeEnum.album, DownloadTypeEnum.artist):
-            return
-        tags = getattr(track_info, 'tags', None)
-        if tags is None:
-            return
-        captured = meta['_captured']
-
-        def _resolve(field_name, album_value):
-            if album_value:
-                return album_value
-            current = getattr(tags, field_name, None)
-            if current:
-                captured.setdefault(field_name, current)
-            return captured.get(field_name)
-
-        label = _resolve('label', meta.get('label'))
-        if label:
-            tags.label = label
-        catalog_number = _resolve('catalog_number', meta.get('catalog_number'))
-        if catalog_number:
-            tags.catalog_number = catalog_number
-        upc = _resolve('upc', meta.get('upc'))
-        if upc:
-            tags.upc = upc
-        # Album has no copyright field — capture the first track's value and reuse for all.
-        copyright_value = _resolve('copyright', '')
-        if copyright_value:
-            tags.copyright = copyright_value
-
     def _apply_track_index_to_tags(self, track_info: TrackInfo, track_index: int, number_of_tracks: int) -> None:
         """Map download index to tags. Playlists/albums can opt into sequential numbering via settings."""
         if not track_index:
@@ -2368,7 +2308,7 @@ class Downloader:
         elif not track_info.tags.total_tracks and number_of_tracks:
             track_info.tags.total_tracks = number_of_tracks
 
-    def _create_track_location(self, album_location: str, track_info: TrackInfo, override_codec=None) -> str:
+    def _create_track_location(self, album_location: str, track_info: TrackInfo, override_codec=None, extra_kwargs=None) -> str:
         """Create the full file path for a track. Use override_codec (e.g. from download_info.different_codec) for the file extension when the downloaded file is in a different container."""
         # Clean up track tags and add special formats
         # Filter asdict to only include top-level strings for basic formatting, then explicitly handle complex fields
@@ -2457,6 +2397,14 @@ class Downloader:
         
         if is_single_track_download:
             format_string = self.global_settings['formatting']['single_full_path_format']
+            # For single tracks, {quality} should mirror the album folder style: prefer the
+            # catalog/search label (e.g. "[🅷 HI-RES]" / "[◗◖ ATMOS]") over the bare codec name.
+            catalog_quality = ''
+            if isinstance(extra_kwargs, dict):
+                catalog_quality = extra_kwargs.get('catalog_quality') or extra_kwargs.get('display_quality') or ''
+            quality_source = catalog_quality or (track_info.codec.name if track_info.codec else '')
+            quality_label = self._quality_path_label(quality_source)
+            track_tags['quality'] = f'[{quality_label}]' if quality_label else ''
         else:  # Track in album/playlist
             format_string = self.global_settings['formatting']['track_filename_format']
 
@@ -2595,9 +2543,6 @@ class Downloader:
         if not self._ensure_can_download_or_abort('album', album_id, 'Album'):
             return []
 
-        # Reset any leftover album-level metadata reference from a previous album
-        self._album_level_metadata = None
-
         # Get album info - use indent level 1 to match album details
         self.set_indent_number(1)
         self.print(f'Fetching data. Please wait...')
@@ -2633,9 +2578,6 @@ class Downloader:
                 use_discography_format=use_discography_format,
                 extra_kwargs=extra_kwargs,
             )
-
-            if self._force_album_metadata_enabled():
-                self._album_level_metadata = self._build_album_level_metadata(album_info)
 
             self._init_download_error_log(album_path, 'album', album_info.name, album_id)
             catalog_exclusions = self._resolve_album_catalog_exclusions(album_info)
@@ -3366,7 +3308,7 @@ class Downloader:
 
                 # Check if file already exists BEFORE getting download info (for temp file modules like Deezer)
                 if self._skip_existing_files_enabled() and track_info:
-                    track_location = self._create_track_location(album_location, track_info)
+                    track_location = self._create_track_location(album_location, track_info, extra_kwargs=extra_kwargs)
                     if await loop.run_in_executor(None, os.path.isfile, track_location):
                         return "ALREADY_EXISTS"
                 
@@ -3392,7 +3334,8 @@ class Downloader:
         # Create track location (use different_codec if module converted e.g. Tidal Atmos -> FLAC)
         track_location = self._create_track_location(
             album_location, track_info,
-            override_codec=getattr(download_info, 'different_codec', None)
+            override_codec=getattr(download_info, 'different_codec', None),
+            extra_kwargs=extra_kwargs
         )
         # Ensure parent directory exists for custom single path formats that include subfolders.
         track_parent_dir = os.path.dirname(track_location)
@@ -3533,9 +3476,6 @@ class Downloader:
             
             # Get credits list (populated by _fetch_metadata if found)
             credits_list = getattr(track_info, 'credits_list', [])
-
-            # Force album-level tags (COPYRIGHT, LABEL, catalog/UPC) uniform across the album when enabled
-            self._apply_album_level_metadata_to_track(track_info)
             
             # Check if container supports tagging
             tagging_supported_containers = [ContainerEnum.flac, ContainerEnum.mp3, ContainerEnum.m4a, ContainerEnum.ogg, ContainerEnum.opus, ContainerEnum.webm]
@@ -3915,7 +3855,7 @@ class Downloader:
         if not album_location:
             # For single track downloads, use the base path
             album_location = self.path
-        track_location = self._create_track_location(album_location, track_info)
+        track_location = self._create_track_location(album_location, track_info, extra_kwargs=extra_kwargs)
 
         # Ensure parent directory exists for custom single path formats that include subfolders.
         track_parent_dir = os.path.dirname(track_location)
@@ -4129,7 +4069,7 @@ class Downloader:
 
         # Use actual container when module converts (e.g. Tidal Atmos AC4 -> FLAC)
         if getattr(download_info, 'different_codec', None):
-            track_location = self._create_track_location(album_location, track_info, override_codec=download_info.different_codec)
+            track_location = self._create_track_location(album_location, track_info, override_codec=download_info.different_codec, extra_kwargs=extra_kwargs)
             if self._skip_existing_files_enabled() and os.path.exists(track_location):
                 d_print(f'Track file already exists')
                 if details_indent_adjustment != 0:
@@ -4253,9 +4193,6 @@ class Downloader:
             
             # Get credits list (populated by _fetch_metadata if found)
             credits_list = getattr(track_info, 'credits_list', [])
-
-            # Force album-level tags (COPYRIGHT, LABEL, catalog/UPC) uniform across the album when enabled
-            self._apply_album_level_metadata_to_track(track_info)
             
             # Check if container supports tagging
             tagging_supported_containers = [ContainerEnum.flac, ContainerEnum.mp3, ContainerEnum.m4a, ContainerEnum.ogg, ContainerEnum.opus, ContainerEnum.webm]
