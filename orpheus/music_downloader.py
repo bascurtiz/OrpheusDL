@@ -1211,6 +1211,15 @@ class Downloader:
 
         use_inplace = sys.stdout.isatty() and self.oprinter.printing_enabled
         indent = self._countdown_indent_prefix(drop_level)
+        if not use_inplace:
+            remaining_int = int(max(1, pause_seconds + 0.999))
+            sec_label = "second" if remaining_int == 1 else "seconds"
+            self.print(f'Pausing {remaining_int} {sec_label} to prevent rate limiting...', drop_level=drop_level)
+            time.sleep(pause_seconds)
+            if with_padding:
+                print()
+            return
+
         end_time = time.time() + pause_seconds
         last_remaining = None
         last_line_len = 0
@@ -2567,12 +2576,11 @@ class Downloader:
             with open(album_path + 'description.txt', 'w', encoding='utf-8') as f:
                 f.write(album_info.description)  # Also add support for this with singles maybe?
 
-    def download_album(self, album_id, artist_name='', path=None, indent_level=1, extra_kwargs=None):
+    def download_album(self, album_id, artist_name='', path=None, indent_level=1, extra_kwargs=None, artist_album_index=None, artist_album_count=None):
         # Set indent
         self.set_indent_number(indent_level)
         d_print = self.oprinter.oprint
         symbols = self._get_status_symbols()
-        self._last_album_download_result = None
 
         if not self._ensure_can_download_or_abort('album', album_id, 'Album'):
             return []
@@ -2807,7 +2815,6 @@ class Downloader:
                     else:
                         track_content_indent = 1
                     download_result = self.download_track(track_id_to_download, album_location=album_path, track_index=index, number_of_tracks=number_of_tracks, main_artist=artist_name, cover_temp_location=cover_temp_location, indent_level=track_content_indent, extra_kwargs=album_info.track_extra_kwargs)
-                    self._last_album_download_result = download_result
                     
                     # Add pause between downloads for Spotify/YouTube to prevent rate limiting
                     # Only pause if track was actually downloaded (not skipped) and not the last track
@@ -2903,9 +2910,12 @@ class Downloader:
         elif number_of_tracks == 1:
             # Single-track albums go directly to track download without album header or completion message.
             # Pass album_info so download_track can save external album files in the exact resolved track folder.
+            service_name_lower = ""
+            if hasattr(self, 'service_name') and self.service_name:
+                service_name_lower = self.service_name.lower()
             single_track_item = album_info.tracks[0]
             track_id_to_download = single_track_item.id if hasattr(single_track_item, 'id') else single_track_item # Check for .id attribute
-            self._last_album_download_result = self.download_track(
+            download_result = self.download_track(
                 track_id_to_download,
                 album_location=path,
                 number_of_tracks=1,
@@ -2914,6 +2924,21 @@ class Downloader:
                 extra_kwargs=album_info.track_extra_kwargs,
                 album_info_for_single=album_info
             )
+            # Artist discography: single-track albums skip the in-album pause loop above.
+            if (
+                self.download_mode is DownloadTypeEnum.artist
+                and service_name_lower == 'spotify'
+                and artist_album_index is not None
+                and artist_album_count is not None
+                and artist_album_index < artist_album_count
+            ):
+                if self._handle_spotify_rate_limit_pause(
+                    download_result,
+                    artist_album_index,
+                    artist_album_count,
+                    service_name_override=service_name_lower,
+                ):
+                    print()
 
         self._current_disc_track_totals = {}
         return album_info.tracks
@@ -3028,18 +3053,10 @@ class Downloader:
                 artist_name=artist_name,
                 path=artist_path,
                 indent_level=2,
-                extra_kwargs=artist_info.album_extra_kwargs # General extra_kwargs from artist level
+                extra_kwargs=artist_info.album_extra_kwargs, # General extra_kwargs from artist level
+                artist_album_index=index,
+                artist_album_count=number_of_albums,
             )
-
-            # Spotify: pause between albums (single-track albums skip the in-album pause loop)
-            if service_name_lower == 'spotify' and index < number_of_albums:
-                if self._handle_spotify_rate_limit_pause(
-                    getattr(self, '_last_album_download_result', None),
-                    index,
-                    number_of_albums,
-                    service_name_override=service_name_lower,
-                ):
-                    print()
 
         self.set_indent_number(2)
         skip_tracks = self.global_settings['artist_downloading']['separate_tracks_skip_downloaded']
