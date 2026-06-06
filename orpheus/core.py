@@ -629,5 +629,36 @@ def orpheus_core_download(orpheus_session: Orpheus, media_to_download, third_par
                 # Show "no tracks deferred" message only for multiple track downloads
                 downloader.print('No tracks were deferred due to rate limiting.', drop_level=0)
                 print()  # Add blank line after message
+    
+    
+    minutes = int(downloader.total_download_time // 60)
+    seconds = downloader.total_download_time % 60
+    if downloader.total_download_time > 0:
+        time_str = f"{minutes}m {seconds:.1f}s"
+    else:
+        time_str = f"{seconds:.1f}s"
+    print()
+    print("=== TOTAL COUNTS ===")
+    print(f"=== Download time: {time_str}")
+    print(f'=== {downloader.track_download_count} tracks downloaded ===')
+    print(f'=== {downloader.track_skipped_count} tracks skipped ===')
+    print()
 
+    if (downloader.track_not_streamable_count > 0) or (downloader.track_download_failed_count):
+        albumsSet = set(downloader.albums_with_failed_tracks)
+        print("=== ERRORS ===")
+        # if(downloader.track_not_streamable_count > 0):
+        #     print(f'=== {downloader.track_not_streamable_count} tracks not streamable ===')
+        #     for album in set(downloader.tracks_not_streamable):
+        #         print(f'   https://play.qobuz.com/album/{album}')
+        if(downloader.track_download_failed_count > 0):
+            print(f'=== {downloader.track_download_failed_count} tracks failed on {len(albumsSet)} albums ===')
+            for album in albumsSet:
+                print(f'   https://play.qobuz.com/album/{album}')
+        print()
+    else:
+        print("=== NO ERRORS ===")
+        print()
+
+        
     if os.path.exists('temp'): shutil.rmtree('temp')

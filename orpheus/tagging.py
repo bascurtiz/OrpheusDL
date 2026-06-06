@@ -16,6 +16,7 @@ from mutagen.mp4 import MP4Tags
 from mutagen.oggopus import OggOpus
 from mutagen.oggvorbis import OggVorbis
 from mutagen.oggvorbis import OggVorbisHeaderError
+from datetime import date
 import mutagen
 
 from utils.exceptions import *
@@ -24,6 +25,7 @@ from utils.utils import format_album_artist_tag, get_primary_artist, zfill_numbe
 
 # Needed for Windows tagging support
 MP4Tags._padding = 0
+today = date.today()
 
 
 def _resize_image_if_needed(image_path: str, max_size_bytes: int = 16 * 1024 * 1024, target_resolution: tuple = (3000, 3000)) -> str:
@@ -156,6 +158,11 @@ def tag_file(file_path: str, image_path: str, track_info: TrackInfo, credits_lis
         if 'encoder' in tagger.tags:
             del tagger.tags['encoder']
 
+    tagger['title'] = track_info.name
+    if track_info.album: tagger['album'] = track_info.album
+    if track_info.tags.album_artists: tagger['albumartist'] = track_info.tags.album_artists
+    tagger['artist'] = track_info.artists
+
     if container == ContainerEnum.m4a or container == ContainerEnum.mp4:
         # Raw MP4 atom names for standard tags
         tagger['\xa9nam'] = [track_info.name]
@@ -185,6 +192,10 @@ def tag_file(file_path: str, image_path: str, track_info: TrackInfo, credits_lis
         else:
             tagger['artist'] = metadata_separator.join(track_info.artists) if isinstance(track_info.artists, list) else track_info.artists
 
+    tagger['title'] = track_info.name
+    if track_info.album: tagger['album'] = track_info.album
+    if track_info.tags.album_artists: tagger['albumartist'] = track_info.tags.album_artists
+    tagger['artist'] = track_info.artists
     tn = track_info.tags.track_number
     tt = track_info.tags.total_tracks
     dn = track_info.tags.disc_number
@@ -319,6 +330,9 @@ def tag_file(file_path: str, image_path: str, track_info: TrackInfo, credits_lis
     # add the description tag
     if track_info.tags.description and (container == ContainerEnum.m4a or container == ContainerEnum.mp4):
         tagger['desc'] = [track_info.tags.description]
+
+    tagger['comment'] = 'Qobuz OrpheusDL ' + today.strftime("%m/%d/%y")
+    tagger['source'] = 'Qobuz'
 
     # add comment tag
     if track_info.tags.comment:
