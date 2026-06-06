@@ -48,11 +48,13 @@ class Orpheus:
                 "separate_tracks_skip_downloaded": True
             },
             "formatting": {
+                "discography_format": "{name} {quality}",
                 "album_format": "{artist}/{name}",
                 "playlist_format": "{name}",
-                "track_filename_format": "{artist} - {name}",
+                "track_filename_format": "{track_number}. {artist} - {name}",
                 "single_full_path_format": "{artist} - {name}",
                 "metadata_separator": ";",
+                "filename_separator": "",
                 "split_metadata": True,
                 "enable_zfill": True,
                 "force_album_format": False,
@@ -77,6 +79,7 @@ class Orpheus:
                 "embed_cover": True,
                 "main_compression": "high",
                 "main_resolution": 1400,
+                "save_original_cover_size": False,
                 "save_external": False,
                 "external_format": 'png',
                 "external_compression": "low",

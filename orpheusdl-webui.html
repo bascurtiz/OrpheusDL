@@ -1872,6 +1872,14 @@
           <div class="card-label blue">FORMATTING</div>
           <div class="setting-row">
             <div class="setting-label"
+              title="Album folders inside artist/label discography downloads.&#10;Same variables as Album Format. Use {name} if album_format already has {artist}.&#10;Add {quality} for multiple editions; collisions are auto-disambiguated.">
+              Discography Format <div class="help-icon">?</div>
+            </div>
+            <input type="text" id="global-discography_format" data-path="global.formatting.discography_format"
+              style="width:200px;" />
+          </div>
+          <div class="setting-row">
+            <div class="setting-label"
               title="Folder structure for albums. Variables:&#10; {artist}, {artist_id}, {artist_initials}, {album_artist}, {name}&#10; {id}, {label}, {catalog_number}, {release_year}&#10; {upc}, {explicit}, {quality}">
               Album Format <div class="help-icon">?</div>
             </div>
@@ -1903,7 +1911,7 @@
               style="width:200px;" />
           </div>
           <div class="setting-row">
-            <div class="setting-label" title="Pads track/disc numbers with leading zeros (e.g., 01, 02).">Enable Zfill
+            <div class="setting-label" title="Pads track/disc numbers with leading zeros (e.g., 01, 02) in filenames and embedded tags. Requires {track_number} in Track Filename Format.">Enable Zfill
               <div class="help-icon">?</div>
             </div>
             <div class="toggle" id="global-enable_zfill" data-path="global.formatting.enable_zfill"

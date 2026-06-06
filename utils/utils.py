@@ -77,6 +77,23 @@ def sanitise_name(name):
     return s
 
 
+def zfill_number(value, total=None, min_digits=2):
+    """Zero-pad a track/disc index for filenames and metadata (minimum two digits)."""
+    if value is None or value == '':
+        return ''
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return str(value)
+    width = min_digits
+    if total is not None and total != '':
+        try:
+            width = max(min_digits, len(str(int(total))))
+        except (TypeError, ValueError):
+            pass
+    return str(n).zfill(width)
+
+
 def get_primary_artist(artist_data):
     """
     Extract only the primary (first) artist from a list or a string with separators.
@@ -98,6 +115,101 @@ def get_primary_artist(artist_data):
         return parts[0].strip()
     
     return str(artist_data)
+
+
+def _dedupe_artist_names(names: list) -> list[str]:
+    seen = set()
+    out = []
+    for name in names:
+        cleaned = str(name).strip()
+        if not cleaned:
+            continue
+        key = cleaned.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(cleaned)
+    return out
+
+
+def parse_multi_artist_name(artist_name) -> list[str]:
+    """
+    Split a display artist string into individual artists when it lists collaborators.
+
+    Apple Music (and iTunes) join collaborators with " & " (e.g. "Albert King & Stevie Ray Vaughan").
+    Duo or group names such as "Simon & Garfunkel" are kept intact unless both sides look like
+    multi-word names, which indicates separate credited artists rather than a single act.
+    """
+    if artist_name is None:
+        return []
+    if isinstance(artist_name, list):
+        combined = []
+        for item in artist_name:
+            combined.extend(parse_multi_artist_name(item))
+        return _dedupe_artist_names(combined)
+
+    name = str(artist_name).strip()
+    if not name:
+        return []
+
+    if ' & ' not in name:
+        return [name]
+
+    parts = [part.strip() for part in name.split(' & ') if part.strip()]
+    if len(parts) < 2:
+        return [name]
+
+    # "Albert King & Stevie Ray Vaughan" — both sides contain a space.
+    # "Simon & Garfunkel" — neither side contains a space; keep as one artist.
+    if len(parts) > 2 or all(' ' in part for part in parts):
+        return _dedupe_artist_names(parts)
+    return [name]
+
+
+def artists_from_apple_attrs(attrs: dict) -> list[str]:
+    """Build a list of track/album artists from Apple Music catalog attributes."""
+    if not attrs:
+        return ['Unknown Artist']
+
+    raw_names = attrs.get('artistNames')
+    if isinstance(raw_names, list) and raw_names:
+        names = [str(n).strip() for n in raw_names if n and str(n).strip()]
+        if names:
+            return _dedupe_artist_names(names)
+
+    parsed = parse_multi_artist_name(attrs.get('artistName') or attrs.get('name'))
+    return parsed if parsed else ['Unknown Artist']
+
+
+def resolve_filename_separator(formatting: dict | None = None) -> str:
+    """Separator for joining multi-value fields in path/filename templates."""
+    fmt = formatting or {}
+    sep = fmt.get('filename_separator')
+    if sep is None or (isinstance(sep, str) and sep == ''):
+        return fmt.get('metadata_separator', ';')
+    return str(sep)
+
+
+def format_album_artist_tag(artist_data, separator: str = ', ') -> str:
+    """Join multiple album artists for embedded metadata display."""
+    if isinstance(artist_data, list):
+        names = _dedupe_artist_names(artist_data)
+    else:
+        names = parse_multi_artist_name(artist_data)
+    if not names:
+        return ''
+    return separator.join(names) if len(names) > 1 else names[0]
+
+
+def resolve_album_artist_tag(*sources, separator: str = ', ') -> str:
+    """Pick the first usable album-artist source and normalize separators."""
+    for source in sources:
+        if not source:
+            continue
+        formatted = format_album_artist_tag(source, separator=separator)
+        if formatted:
+            return formatted
+    return ''
 
 
 def _truncate_utf8_bytes(value: str, max_bytes: int) -> str:
@@ -145,9 +257,9 @@ def fix_byte_limit(path: str, byte_limit=250):
 
 r_session = create_requests_session()
 
-async def download_file_async(session, url, file_location, headers={}, enable_progress_bar=False, indent_level=0, artwork_settings=None, max_retries=3):
+async def download_file_async(session, url, file_location, headers={}, enable_progress_bar=False, indent_level=0, artwork_settings=None, max_retries=3, skip_if_exists=True):
     """Async version of download_file using aiohttp - returns (file_location, bytes_downloaded)"""
-    if os.path.isfile(file_location):
+    if skip_if_exists and os.path.isfile(file_location):
         # File already exists - return 0 bytes downloaded
         return (file_location, 0)
 
@@ -248,9 +360,9 @@ async def download_file_async(session, url, file_location, headers={}, enable_pr
                 silentremove(file_location)
             raise KeyboardInterrupt
 
-def download_file(url, file_location, headers={}, enable_progress_bar=False, indent_level=0, artwork_settings=None):
+def download_file(url, file_location, headers={}, enable_progress_bar=False, indent_level=0, artwork_settings=None, skip_if_exists=True):
     """Synchronous wrapper for the async download function for backward compatibility"""
-    if os.path.isfile(file_location):
+    if skip_if_exists and os.path.isfile(file_location):
         return None
 
     # Create directory structure if it doesn't exist
@@ -489,6 +601,63 @@ def get_clean_env():
             env['PATH'] = os.pathsep.join(cleaned_path)
     
     return env
+
+
+def open_with_system_default(target: str) -> bool:
+    """Open a URL, file, or folder with the OS default handler.
+
+    Uses a cleaned environment on Linux/macOS frozen builds (PyInstaller/AppImage)
+    so xdg-open/open do not inherit LD_LIBRARY_PATH/DYLD_LIBRARY_PATH from the bundle,
+    which otherwise prevents the handler from starting on Wayland and X11.
+    Returns True if a launcher was invoked without raising."""
+    import platform as _platform
+    import subprocess
+
+    if not target:
+        return False
+    try:
+        if _platform.system() == 'Windows':
+            os.startfile(target)  # type: ignore[attr-defined]
+            return True
+        env = get_clean_env()
+        if _platform.system() == 'Darwin':
+            subprocess.run(['open', target], check=False, env=env)
+        else:
+            subprocess.run(['xdg-open', target], check=False, env=env)
+        return True
+    except Exception:
+        return False
+
+
+def open_url_in_browser(url: str) -> bool:
+    """Open *url* in the system default browser (alias for open_with_system_default)."""
+    return open_with_system_default(url)
+
+
+_webbrowser_open_patched = False
+
+
+def patch_webbrowser_open():
+    """Route webbrowser.open() through open_with_system_default (OAuth, vendor code, etc.)."""
+    global _webbrowser_open_patched
+    if _webbrowser_open_patched:
+        return
+    import webbrowser
+    _orig_open = webbrowser.open
+
+    def _open(url, new=0, autoraise=True):
+        if open_with_system_default(url):
+            return True
+        try:
+            return _orig_open(url, new, autoraise)
+        except Exception:
+            return False
+
+    webbrowser.open = _open
+    _webbrowser_open_patched = True
+
+
+patch_webbrowser_open()
 
 
 _SHAKA_PACKAGER_NAMES = {
