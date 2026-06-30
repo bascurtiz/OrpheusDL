@@ -146,12 +146,22 @@ def simplify_error_message(error_str: str) -> str:
            ('formatnotavailable' in error_lower):
             # If it's a raw FormatNotAvailable, convert it to the user-friendly one
             if 'formatnotavailable' in error_lower and 'docker/wrapper' not in error_lower:
-                 return "ALAC & Dolby Atmos require 'Use Wrapper' to be enabled. Please enable it in Apple Music settings or select 'High' quality instead to download in AAC."
+                 return "Make sure wrapper is running and enabled to download ALAC format."
             
             # Strip any leading prefixes if they were added upstream
             if " - " in error_str: error_str = error_str.split(" - ", 1)[-1].strip()
             if error_str.startswith("Apple Music:"): error_str = error_str[12:].strip()
             return error_str
+        return error_str
+
+    # Apple Music ALAC license restriction (-1002) without wrapper
+    if 'license exchange' in error_lower and '-1002' in error_str:
+        return "Make sure wrapper is running and enabled to download ALAC format."
+    if 'make sure wrapper is running and enabled to download alac format' in error_lower:
+        return "Make sure wrapper is running and enabled to download ALAC format."
+    if 'wrapper-v2 is running' in error_lower or 'wrapper is running but not logged in' in error_lower:
+        if " - " in error_str:
+            return error_str.split(" - ", 1)[-1].strip()
         return error_str
     
     # JSON API error responses (e.g., Apple Music, Qobuz)
@@ -216,7 +226,7 @@ def simplify_error_message(error_str: str) -> str:
         if len(error_str) < 500:
             if " - " in error_str and not error_str.split(" - ", 1)[-1].strip():
                 return "Apple Music error: Download failed (unknown cause)"
-            if error_str.startswith("Apple Music:") or "ALAC & Dolby Atmos require" in error_str or "local decryption service" in error_str.lower():
+            if error_str.startswith("Apple Music:") or "Use Wrapper" in error_str or "local decryption service" in error_str.lower():
                 return error_str
             return f"Apple Music error: {error_str}"
                 
@@ -1305,6 +1315,38 @@ class Downloader:
     def search_by_tags(self, module_name, track_info: TrackInfo):
         return self.loaded_modules[str(module_name).lower()].search(DownloadTypeEnum.track, f'{track_info.name} {" ".join(track_info.artists)}', track_info=track_info)
 
+    @staticmethod
+    def _was_actual_track_download(result):
+        """True when a track download actually transferred data (not skip/rate-limit)."""
+        return result is not None and result not in ("SKIPPED", "RATE_LIMITED", "ALREADY_EXISTS")
+
+    def _apply_tidal_inter_track_pacing(self):
+        """Apply TIDAL inter-track delay only before a real download (not skipped files)."""
+        gate = getattr(self, '_active_tidal_gate', None)
+        cfg = getattr(self, '_active_tidal_cfg', None)
+        if not gate or not cfg:
+            return
+        if hasattr(gate, 'wait_for_slot'):
+            gate.wait_for_slot()
+            gate.arm_next_gap(cfg['delay_min'], cfg['delay_max'])
+        else:
+            gate.wait_turn(cfg['delay_min'], cfg['delay_max'])
+
+    async def _apply_tidal_inter_track_pacing_async(self):
+        """Async variant of _apply_tidal_inter_track_pacing."""
+        import asyncio
+        gate = getattr(self, '_active_tidal_gate', None)
+        cfg = getattr(self, '_active_tidal_cfg', None)
+        if not gate or not cfg:
+            return
+        if hasattr(gate, 'wait_for_slot'):
+            await gate.wait_for_slot()
+            arm_next = gate.arm_next_gap(cfg['delay_min'], cfg['delay_max'])
+            if asyncio.iscoroutine(arm_next):
+                await arm_next
+        else:
+            await gate.wait_turn(cfg['delay_min'], cfg['delay_max'])
+
     def _concurrent_download_tracks(self, track_list, download_args_list, concurrent_downloads, performance_summary_indent=0):
         """Helper method to download tracks concurrently using asyncio + aiohttp"""
         if concurrent_downloads <= 1:
@@ -1312,19 +1354,26 @@ class Downloader:
             self.print("Using sequential downloads (sync)")
             results = []
             tidal_cfg = None
+            tidal_gate = None
             if hasattr(self, 'service_name') and self.service_name:
-                from utils.tidal_throttle import resolve_tidal_throttle
+                from utils.tidal_throttle import resolve_tidal_throttle, TidalInterTrackGateSync
                 tidal_cfg = resolve_tidal_throttle(
                     getattr(self, 'full_settings', None), self.service_name
                 )
-            for i, (track_info, args) in enumerate(zip(track_list, download_args_list)):
-                if i > 0 and tidal_cfg:
-                    time.sleep(random.uniform(tidal_cfg['delay_min'], tidal_cfg['delay_max']))
-                try:
-                    result = self.download_track(**args)
-                    results.append((i, result, None))
-                except Exception as e:
-                    results.append((i, None, e))
+                if tidal_cfg:
+                    tidal_gate = TidalInterTrackGateSync()
+            self._active_tidal_gate = tidal_gate
+            self._active_tidal_cfg = tidal_cfg
+            try:
+                for i, (track_info, args) in enumerate(zip(track_list, download_args_list)):
+                    try:
+                        result = self.download_track(**args)
+                        results.append((i, result, None))
+                    except Exception as e:
+                        results.append((i, None, e))
+            finally:
+                self._active_tidal_gate = None
+                self._active_tidal_cfg = None
             return results
         
         # Use asyncio + aiohttp for concurrent downloads
@@ -1360,6 +1409,8 @@ class Downloader:
                 tidal_start_gate = TidalInterTrackGateAsync()
                 if tidal_cfg.get('rpm', 0) > 0:
                     tidal_rpm = RequestsPerMinuteLimiterAsync(tidal_cfg['rpm'])
+        self._active_tidal_gate = tidal_start_gate
+        self._active_tidal_cfg = tidal_cfg
         
         async def download_worker_async(session, index, args):
             """Async worker function to download a single track - OPTIMIZED VERSION"""
@@ -1442,6 +1493,8 @@ class Downloader:
                         track_location = self._create_track_location(args.get('album_location', ''), track_info, extra_kwargs=args.get('extra_kwargs', {}))
                         if await loop.run_in_executor(None, os.path.isfile, track_location):
                             return (index, track_name, "SKIPPED", None, None, 0, 0)
+
+                    await self._apply_tidal_inter_track_pacing_async()
                     
                     # SINGLE API CALL: Get download info once - IN THREAD POOL
                     def get_download_info_wrapper():
@@ -1534,10 +1587,6 @@ class Downloader:
                 semaphore = asyncio.Semaphore(concurrent_downloads)
                 
                 async def bounded_download(index, args):
-                    if tidal_start_gate and tidal_cfg:
-                        await tidal_start_gate.wait_turn(
-                            tidal_cfg['delay_min'], tidal_cfg['delay_max']
-                        )
                     async with semaphore:
                         return await download_worker_async(session, index, args)
                 
@@ -1658,6 +1707,9 @@ class Downloader:
                 except Exception as e:
                     results.append((i, None, e))
             return results
+        finally:
+            self._active_tidal_gate = None
+            self._active_tidal_cfg = None
         
         # Performance summary
         total_time = time.time() - start_time
@@ -4065,7 +4117,7 @@ class Downloader:
                         simplified_error = simplify_error_message(error_msg)
                         if getattr(self, 'full_settings', {}).get('global', {}).get('advanced', {}).get('debug_mode'):
                             d_print(f'Original error: {error_msg}')
-                        if simplified_error.startswith("Apple Music:") or "local decryption service" in simplified_error.lower() or "ALAC & Dolby Atmos require" in simplified_error:
+                        if simplified_error.startswith("Apple Music:") or "local decryption service" in simplified_error.lower() or "Use Wrapper" in simplified_error:
                             d_print(simplified_error)
                         else:
                             d_print(f'Download failed: {simplified_error}')
@@ -4099,7 +4151,7 @@ class Downloader:
                     simplified_error = simplify_error_message(error_msg)
                     if getattr(self, 'full_settings', {}).get('global', {}).get('advanced', {}).get('debug_mode'):
                         d_print(f'Original error: {error_msg}')
-                    if simplified_error.startswith("Apple Music:") or "local decryption service" in simplified_error.lower() or "ALAC & Dolby Atmos require" in simplified_error:
+                    if simplified_error.startswith("Apple Music:") or "local decryption service" in simplified_error.lower() or "Use Wrapper" in simplified_error:
                         d_print(simplified_error)
                     else:
                         d_print(f'Download failed: {simplified_error}')
@@ -4131,6 +4183,7 @@ class Downloader:
 
         self._prepare_track_download_path(track_location)
 
+        self._apply_tidal_inter_track_pacing()
         d_print('Downloading audio...')
         try:
             final_location = download_file(
