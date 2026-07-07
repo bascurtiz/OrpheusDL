@@ -438,6 +438,19 @@ def tag_file(file_path: str, image_path: str, track_info: TrackInfo, credits_lis
             tagger['\xa9lyr'] = [embedded_lyrics]
         else:
             tagger['lyrics'] = embedded_lyrics
+    else:
+        # Remove lyrics left by upstream downloaders (e.g. gamdl) when embedding is disabled.
+        if container == ContainerEnum.m4a or container == ContainerEnum.mp4:
+            if '\xa9lyr' in tagger:
+                del tagger['\xa9lyr']
+        elif container == ContainerEnum.mp3:
+            if hasattr(tagger.tags, '_EasyID3__id3') and 'USLT' in tagger.tags._EasyID3__id3:
+                del tagger.tags._EasyID3__id3['USLT']
+        elif container in {ContainerEnum.flac, ContainerEnum.ogg, ContainerEnum.opus, ContainerEnum.webm}:
+            if 'lyrics' in tagger:
+                del tagger['lyrics']
+            if 'LYRICS' in tagger:
+                del tagger['LYRICS']
 
     if track_info.tags.replay_gain and track_info.tags.replay_peak and container != ContainerEnum.m4a and container != ContainerEnum.mp4:
         tagger['REPLAYGAIN_TRACK_GAIN'] = str(track_info.tags.replay_gain)
