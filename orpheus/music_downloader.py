@@ -2667,6 +2667,8 @@ class Downloader:
                 self.print(f'Could not get album info for {album_id}: {simplify_error_message(normalized_msg)}', drop_level=1)
                 symbols = self._get_status_symbols()
                 self.print(f'=== {symbols["error"]} Album failed ===', drop_level=1)
+                # self.track_download_failed_count += album_info.track_count if album_info else 0
+                self.albums_with_failed_tracks.append(album_id)
             return []
 
         if not album_info:

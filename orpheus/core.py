@@ -644,14 +644,14 @@ def orpheus_core_download(orpheus_session: Orpheus, media_to_download, third_par
     print(f'=== {downloader.track_skipped_count} tracks skipped ===')
     print()
 
-    if (downloader.track_not_streamable_count > 0) or (downloader.track_download_failed_count):
+    if (downloader.track_not_streamable_count > 0) or (downloader.track_download_failed_count) or (len(downloader.albums_with_failed_tracks) > 0):
         albumsSet = set(downloader.albums_with_failed_tracks)
         print("=== ERRORS ===")
         # if(downloader.track_not_streamable_count > 0):
         #     print(f'=== {downloader.track_not_streamable_count} tracks not streamable ===')
         #     for album in set(downloader.tracks_not_streamable):
         #         print(f'   https://play.qobuz.com/album/{album}')
-        if(downloader.track_download_failed_count > 0):
+        if(downloader.track_download_failed_count > 0) or (len(downloader.albums_with_failed_tracks) > 0):
             print(f'=== {downloader.track_download_failed_count} tracks failed on {len(albumsSet)} albums ===')
             for album in albumsSet:
                 print(f'   https://play.qobuz.com/album/{album}')
