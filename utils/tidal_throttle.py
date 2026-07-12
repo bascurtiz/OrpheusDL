@@ -47,13 +47,22 @@ class TidalInterTrackGateSync:
         self._lock = threading.Lock()
         self._next_start = 0.0
 
-    def wait_turn(self, delay_min: float, delay_max: float) -> None:
+    def wait_for_slot(self) -> None:
+        """Wait until the previous real download's pacing window has elapsed."""
         with self._lock:
             now = time.monotonic()
             if now < self._next_start:
                 time.sleep(self._next_start - now)
+
+    def arm_next_gap(self, delay_min: float, delay_max: float) -> None:
+        """Schedule the next pacing gap after a track that will actually download."""
+        with self._lock:
             gap = random.uniform(delay_min, delay_max)
             self._next_start = time.monotonic() + gap
+
+    def wait_turn(self, delay_min: float, delay_max: float) -> None:
+        self.wait_for_slot()
+        self.arm_next_gap(delay_min, delay_max)
 
 
 class TidalInterTrackGateAsync:
@@ -63,13 +72,22 @@ class TidalInterTrackGateAsync:
         self._lock = asyncio.Lock()
         self._next_start = 0.0
 
-    async def wait_turn(self, delay_min: float, delay_max: float) -> None:
+    async def wait_for_slot(self) -> None:
+        """Wait until the previous real download's pacing window has elapsed."""
         async with self._lock:
             now = time.monotonic()
             if now < self._next_start:
                 await asyncio.sleep(self._next_start - now)
+
+    async def arm_next_gap(self, delay_min: float, delay_max: float) -> None:
+        """Schedule the next pacing gap after a track that will actually download."""
+        async with self._lock:
             gap = random.uniform(delay_min, delay_max)
             self._next_start = time.monotonic() + gap
+
+    async def wait_turn(self, delay_min: float, delay_max: float) -> None:
+        await self.wait_for_slot()
+        await self.arm_next_gap(delay_min, delay_max)
 
 
 class RequestsPerMinuteLimiterSync:

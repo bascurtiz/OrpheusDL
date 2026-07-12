@@ -18,7 +18,9 @@ customtkinter
 tkinterdnd2
 packaging
 httpx
+httpx-retries>=0.4.6
 async_lru==2.1.0
+structlog>=25.5.0
 pybase62
 dataclass-click
 inquirerpy
