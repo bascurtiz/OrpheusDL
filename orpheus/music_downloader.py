@@ -2170,6 +2170,55 @@ class Downloader:
 
         return compact
 
+    _ALBUM_FOLDER_ID_MARKER = '.orpheus_album_id'
+
+    @staticmethod
+    def _album_folder_id_marker_path(album_path: str) -> str:
+        return os.path.join(album_path.rstrip('/\\'), Downloader._ALBUM_FOLDER_ID_MARKER)
+
+    @staticmethod
+    def _read_album_folder_id(album_path: str) -> str:
+        """Return the album id previously stored in this folder, if any."""
+        marker = Downloader._album_folder_id_marker_path(album_path)
+        try:
+            if os.path.isfile(marker):
+                with open(marker, 'r', encoding='utf-8') as f:
+                    return (f.read() or '').strip()
+        except OSError:
+            pass
+        return ''
+
+    @staticmethod
+    def _write_album_folder_id(album_path: str, album_id: str) -> None:
+        """Persist album id so later editions with the same folder name can be separated."""
+        if not album_path or not album_id:
+            return
+        try:
+            os.makedirs(album_path, exist_ok=True)
+            with open(Downloader._album_folder_id_marker_path(album_path), 'w', encoding='utf-8') as f:
+                f.write(str(album_id).strip() + '\n')
+        except OSError:
+            pass
+
+    def _folder_belongs_to_other_album(self, album_path: str, album_id: str) -> bool:
+        """
+        Detect when a formatted album path is already used by a different catalog album.
+
+        Without this, Standard/Deluxe (or Hi-Res/Atmos) editions that share a name land in
+        one folder and ignore_existing_files skips overlapping tracks from the second edition.
+        """
+        album_id_str = str(album_id).strip()
+        if not album_id_str:
+            return False
+
+        existing_id = self._read_album_folder_id(album_path)
+        if existing_id:
+            return existing_id != album_id_str
+
+        # Legacy folders (no marker yet): do not treat as a foreign album.
+        # Re-downloads of the same album can still resume in-place; the marker is written
+        # on this pass so later editions with the same folder name are separated.
+        return False
     @staticmethod
     def _sanitize_formatted_folder_path(formatted: str) -> str:
         """
@@ -2229,11 +2278,13 @@ class Downloader:
         registry = self._discography_album_path_registry
         norm_key = os.path.normpath(album_path.rstrip('/\\'))
         album_id_str = str(album_id)
-        existing_id = registry.get(norm_key)
-        if existing_id is None:
+
+        claimed_id = registry.get(norm_key)
+        disk_foreign = self._folder_belongs_to_other_album(album_path, album_id_str)
+        path_available = (claimed_id in (None, album_id_str)) and not disk_foreign
+
+        if path_available:
             registry[norm_key] = album_id_str
-            return album_path
-        if existing_id == album_id_str:
             return album_path
 
         suffixes = []
@@ -2244,6 +2295,11 @@ class Downloader:
                 suffixes.append(quality_suffix)
         if album_info and album_info.catalog_number:
             suffixes.append(str(album_info.catalog_number))
+        album_name = (album_info.name if album_info else '') or ''
+        for hint in ('Deluxe', 'Extended', 'Anniversary', 'Remaster', 'Expanded', 'Bonus'):
+            if re.search(rf'\b{re.escape(hint)}\b', album_name, flags=re.IGNORECASE):
+                suffixes.append(hint)
+                break
         suffixes.append(album_id_str)
 
         for suffix in suffixes:
@@ -2255,15 +2311,18 @@ class Downloader:
             candidate_key = os.path.normpath(candidate.rstrip('/\\'))
             if candidate_key == norm_key:
                 continue
-            if registry.get(candidate_key) in (None, album_id_str):
-                registry[candidate_key] = album_id_str
-                os.makedirs(candidate, exist_ok=True)
-                folder_name = os.path.basename(candidate.rstrip('/\\'))
-                self.print(
-                    f'⚠ Multiple album editions share the same name — saving to: {folder_name}',
-                    drop_level=1,
-                )
-                return candidate
+            claimed = registry.get(candidate_key)
+            if claimed not in (None, album_id_str):
+                continue
+            if self._folder_belongs_to_other_album(candidate, album_id_str):
+                continue
+            registry[candidate_key] = album_id_str
+            folder_name = os.path.basename(candidate.rstrip('/\\'))
+            self.print(
+                f'⚠ Multiple album editions share the same name — saving to: {folder_name}',
+                drop_level=1,
+            )
+            return candidate
 
         registry[norm_key] = album_id_str
         return album_path
@@ -2328,7 +2387,6 @@ class Downloader:
         ):
             self.print('⚠ Path too long, album folder name was truncated for filesystem safety.')
         album_path += '/'
-        os.makedirs(album_path, exist_ok=True)
 
         album_path = self._disambiguate_discography_album_path(
             album_path,
@@ -2338,6 +2396,8 @@ class Downloader:
             album_info,
             quality_source=quality_source,
         )
+        os.makedirs(album_path, exist_ok=True)
+        self._write_album_folder_id(album_path, album_id)
 
         return album_path
 
