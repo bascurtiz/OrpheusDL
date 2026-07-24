@@ -74,7 +74,10 @@ def sanitise_name(name):
     # Qobuz-style "Composer - Work" (spaces around hyphen); keep compact tokens like "24B-96kHz" untouched.
     s = re.sub(r'\s+-\s+', ' \u00b7 ', s)
     s = re.sub(r'\s+', ' ', s).strip()
-    return s
+    # Windows forbids trailing spaces/periods in path components (e.g. "In The Woods...").
+    # Also strip Unicode ellipsis, which triggers the same WinError 3 on nested makedirs.
+    s = s.rstrip(' .\u2026')
+    return s or '_'
 
 
 def zfill_number(value, total=None, min_digits=2):

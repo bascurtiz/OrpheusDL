@@ -2188,7 +2188,8 @@ class Downloader:
             segment = segment.strip()
             if not segment:
                 continue
-            segment = segment.rstrip(' .-_')
+            # Windows rejects trailing spaces/periods (and Unicode ellipsis) in folder names.
+            segment = segment.rstrip(' .-_\u2026')
             if segment:
                 segments.append(segment)
         return '/'.join(segments)
