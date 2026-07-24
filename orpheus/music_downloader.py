@@ -2170,6 +2170,24 @@ class Downloader:
 
         return compact
 
+    def _playlist_album_group_folder(self, track_tags: dict) -> str:
+        """
+        Build an Artist - Album subfolder name for playlist downloads when group_by_album is on.
+        """
+        if not isinstance(track_tags, dict):
+            return ''
+        artist = (
+            str(track_tags.get('album_artist') or '').strip()
+            or str(track_tags.get('artist') or '').strip()
+            or 'Unknown Artist'
+        )
+        album = str(track_tags.get('album') or '').strip() or 'Unknown Album'
+        folder = f'{artist} - {album}'
+        folder = re.sub(r'\s+', ' ', folder).strip(' .-_\u2026')
+        folder = self._compact_path_tag(folder, max_len=120)
+        folder = truncate_utf8_bytes_keep_suffix(folder, 120).rstrip(' .-_\u2026')
+        return folder or 'Unknown Album'
+
     _ALBUM_FOLDER_ID_MARKER = '.orpheus_album_id'
 
     @staticmethod
@@ -2618,9 +2636,22 @@ class Downloader:
         # Format the filename
         track_filename = format_string.format(**track_tags)
 
-        # For single full path formats, users may include nested folder segments.
-        # Truncate each directory segment to stay within Windows component limits.
-        if is_single_track_download and ('/' in track_filename or '\\' in track_filename):
+        # Playlist option: nest tracks under Artist - Album inside the playlist folder.
+        is_playlist_download = (
+            hasattr(self, 'download_mode') and self.download_mode is DownloadTypeEnum.playlist
+        )
+        if (
+            is_playlist_download
+            and not is_single_track_download
+            and self.global_settings.get('playlist', {}).get('group_by_album', False)
+        ):
+            album_subfolder = self._playlist_album_group_folder(track_tags)
+            if album_subfolder:
+                track_filename = f'{album_subfolder}/{track_filename}'
+
+        # For nested folder segments (single-track templates or playlist album groups),
+        # truncate each directory segment to stay within Windows component limits.
+        if '/' in track_filename or '\\' in track_filename:
             track_filename = track_filename.replace('\\', '/')
             rel_dir, rel_name = os.path.split(track_filename)
             if rel_dir:
@@ -2643,7 +2674,7 @@ class Downloader:
                 track_filename = f'{safe_dir}/{rel_name}' if rel_name else safe_dir
 
                 if dir_was_truncated and self.global_settings.get('advanced', {}).get('debug_mode', False):
-                    self.print('⚠ Path too long, single folder name was truncated for filesystem safety.')
+                    self.print('⚠ Path too long, folder name was truncated for filesystem safety.')
         
         # Add file extension based on codec (or override when e.g. Tidal remuxes Atmos to M4A)
         # AC4/EAC3 (Dolby Atmos): use .m4a so output is always M4A (MPEG-4 audio) per Tidal convention

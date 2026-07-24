@@ -89,7 +89,8 @@ class Orpheus:
             "playlist": {
                 "save_m3u": True,
                 "paths_m3u": "absolute",
-                "extended_m3u": True
+                "extended_m3u": True,
+                "group_by_album": False
             },
             "advanced": {
                 "advanced_login_system": False,
