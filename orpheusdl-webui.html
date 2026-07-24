@@ -1682,6 +1682,22 @@
               <span style="font-size:12px;color:var(--text-muted);min-width:16px;">5</span>
             </div>
           </div>
+          <div class="setting-row">
+            <div class="setting-label"
+              title="How many tracks to download before pausing (batch size).&#10;Set to 0 to disable batch throttling.&#10;Example: 50 downloads 50 tracks, pauses, then continues — useful for large playlists to reduce rate limiting.">
+              Throttle Batch Size <div class="help-icon">?</div>
+            </div>
+            <input type="text" id="global-throttle_batch_size" data-path="global.general.throttle_batch_size"
+              style="width:80px;" />
+          </div>
+          <div class="setting-row">
+            <div class="setting-label"
+              title="How long to pause (in seconds) between batches when Throttle Batch Size is greater than 0.&#10;Example: batch size 50 and pause 30 → download 50 tracks, wait 30 seconds, repeat.">
+              Throttle Pause Seconds <div class="help-icon">?</div>
+            </div>
+            <input type="text" id="global-throttle_pause_seconds" data-path="global.general.throttle_pause_seconds"
+              style="width:80px;" />
+          </div>
         </div>
 
         <div class="glass-card">
@@ -3680,7 +3696,7 @@
           parent[key] = el.classList.contains('on');
         } else {
           let val = el.value;
-          const numericIds = ['global-search_limit', 'global-main_resolution', 'global-external_resolution', 'global-cover_variance_threshold'];
+          const numericIds = ['global-search_limit', 'global-main_resolution', 'global-external_resolution', 'global-cover_variance_threshold', 'global-throttle_batch_size', 'global-throttle_pause_seconds'];
           if (el.type === 'number' || el.type === 'range' || numericIds.includes(el.id)) val = parseInt(val) || 0;
           parent[key] = val;
         }

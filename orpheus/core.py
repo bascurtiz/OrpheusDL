@@ -42,6 +42,8 @@ class Orpheus:
                 "disabled_search_platforms": [],
                 "concurrent_downloads": 5,
                 "progress_bar": False,
+                "throttle_batch_size": 0,
+                "throttle_pause_seconds": 30,
             },
             "artist_downloading":{
                 "return_credited_albums": True,

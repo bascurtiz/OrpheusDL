@@ -1347,6 +1347,94 @@ class Downloader:
         else:
             await gate.wait_turn(cfg['delay_min'], cfg['delay_max'])
 
+    def _get_download_batch_throttle(self):
+        """
+        Return (tracks_per_batch, pause_seconds).
+
+        Disabled when either value is <= 0 (default: both off via batch size 0).
+        """
+        general = self.global_settings.get('general', {}) or {}
+        try:
+            batch_size = int(general.get('throttle_batch_size', 0) or 0)
+        except (TypeError, ValueError):
+            batch_size = 0
+        try:
+            pause_seconds = float(general.get('throttle_pause_seconds', 30) or 0)
+        except (TypeError, ValueError):
+            pause_seconds = 0.0
+        if batch_size <= 0 or pause_seconds <= 0:
+            return 0, 0.0
+        return batch_size, pause_seconds
+
+    def _maybe_batch_throttle_after_track(self, track_index, number_of_tracks, drop_level=1):
+        """
+        Sequential helper: after every N tracks, pause before continuing.
+        track_index is 1-based position in the current album/playlist.
+        """
+        batch_size, pause_seconds = self._get_download_batch_throttle()
+        if not batch_size or not pause_seconds:
+            return False
+        if track_index <= 0 or track_index >= number_of_tracks:
+            return False
+        if track_index % batch_size != 0:
+            return False
+        remaining = int(max(1, pause_seconds + 0.999))
+        sec_label = 'second' if remaining == 1 else 'seconds'
+        self.print(
+            f'Batch throttle: downloaded {track_index} tracks, pausing {remaining} {sec_label}...',
+            drop_level=drop_level,
+        )
+        self._sleep_with_countdown(pause_seconds, drop_level=drop_level, with_padding=True)
+        return True
+
+    def _download_tracks_possibly_throttled(
+        self,
+        track_list,
+        download_args_list,
+        concurrent_downloads,
+        performance_summary_indent=0,
+    ):
+        """
+        Download tracks, optionally in batches with a pause between batches.
+
+        When throttle_batch_size/pause are set, tracks are downloaded in chunks so
+        concurrent workers cannot keep hammering the API across the whole playlist.
+        """
+        batch_size, pause_seconds = self._get_download_batch_throttle()
+        total = len(track_list)
+        if not batch_size or not pause_seconds or total <= batch_size:
+            return self._concurrent_download_tracks(
+                track_list, download_args_list, concurrent_downloads, performance_summary_indent
+            )
+
+        all_results = []
+        num_batches = (total + batch_size - 1) // batch_size
+        for batch_num, start in enumerate(range(0, total, batch_size), start=1):
+            end = min(start + batch_size, total)
+            batch_tracks = track_list[start:end]
+            batch_args = download_args_list[start:end]
+            self.print(
+                f'Batch {batch_num}/{num_batches}: tracks {start + 1}-{end} of {total}',
+                drop_level=performance_summary_indent,
+            )
+            batch_results = self._concurrent_download_tracks(
+                batch_tracks, batch_args, concurrent_downloads, performance_summary_indent
+            )
+            for original_index, result, error in batch_results:
+                # Remap batch-local indices to the full track list.
+                all_results.append((start + original_index, result, error))
+            if end < total:
+                remaining = int(max(1, pause_seconds + 0.999))
+                sec_label = 'second' if remaining == 1 else 'seconds'
+                self.print(
+                    f'Batch throttle: pausing {remaining} {sec_label} before next batch...',
+                    drop_level=performance_summary_indent,
+                )
+                self._sleep_with_countdown(
+                    pause_seconds, drop_level=performance_summary_indent, with_padding=True
+                )
+        return all_results
+
     def _concurrent_download_tracks(self, track_list, download_args_list, concurrent_downloads, performance_summary_indent=0):
         """Helper method to download tracks concurrently using asyncio + aiohttp"""
         if concurrent_downloads <= 1:
@@ -1955,6 +2043,7 @@ class Downloader:
                         self.download_track(track_id, album_location=playlist_path, track_index=index, number_of_tracks=number_of_tracks, indent_level=2, m3u_playlist=m3u_playlist_path, extra_kwargs=playlist_info.track_extra_kwargs)
                     else:
                         self.print(f'Track {track_info.name} not found, skipping')
+                self._maybe_batch_throttle_after_track(index, number_of_tracks, drop_level=1)
         else:
             # Get concurrent downloads setting
             concurrent_downloads = self.global_settings['general'].get('concurrent_downloads', 1)
@@ -2003,8 +2092,8 @@ class Downloader:
                     }
                     download_args_list.append(download_args)
                 
-                # Download tracks concurrently
-                results = self._concurrent_download_tracks(playlist_info.tracks, download_args_list, concurrent_downloads, performance_summary_indent=0)
+                # Download tracks concurrently (with optional batch throttle)
+                results = self._download_tracks_possibly_throttled(playlist_info.tracks, download_args_list, concurrent_downloads, performance_summary_indent=0)
                 
                 # Process results - only collect rate-limited tracks for retry
                 # (Errors are already reported by concurrent download progress monitor)
@@ -2053,6 +2142,8 @@ class Downloader:
                         download_result is not None and download_result != "RATE_LIMITED" and download_result != "SKIPPED"):
                         pause_seconds = self._get_youtube_pause_seconds()
                         self._sleep_with_countdown(pause_seconds, drop_level=1, with_padding=True)
+                    else:
+                        self._maybe_batch_throttle_after_track(index, number_of_tracks, drop_level=1)
                     
                     if download_result == "RATE_LIMITED":
                         logging.info(f"Deferring track {actual_track_id_str_for_download} due to rate limit.")
@@ -2856,8 +2947,8 @@ class Downloader:
                     }
                     download_args_list.append(download_args)
                 
-                # Download tracks concurrently
-                results = self._concurrent_download_tracks(album_info.tracks, download_args_list, concurrent_downloads, performance_summary_indent=0)
+                # Download tracks concurrently (with optional batch throttle)
+                results = self._download_tracks_possibly_throttled(album_info.tracks, download_args_list, concurrent_downloads, performance_summary_indent=0)
                 
                 # Process results and collect rate-limited tracks
                 # (Errors are already reported by concurrent download progress monitor)
@@ -2968,6 +3059,8 @@ class Downloader:
                         download_result is not None and download_result != "RATE_LIMITED" and download_result != "SKIPPED"):
                         pause_seconds = self._get_youtube_pause_seconds()
                         self._sleep_with_countdown(pause_seconds, drop_level=1, with_padding=True)
+                    else:
+                        self._maybe_batch_throttle_after_track(index, number_of_tracks, drop_level=1)
                     
                     # Collect rate-limited tracks for retry
                     if download_result == "RATE_LIMITED":
@@ -3251,8 +3344,8 @@ class Downloader:
                     }
                     download_args_list.append(download_args)
                 
-                # Download tracks concurrently
-                results = self._concurrent_download_tracks(tracks_to_download, download_args_list, concurrent_downloads, performance_summary_indent=1)
+                # Download tracks concurrently (with optional batch throttle)
+                results = self._download_tracks_possibly_throttled(tracks_to_download, download_args_list, concurrent_downloads, performance_summary_indent=1)
                 
                 # Process results and collect rate-limited tracks
                 # (Errors are already reported by concurrent download progress monitor)
@@ -3317,6 +3410,8 @@ class Downloader:
                         download_result is not None and download_result != "RATE_LIMITED" and download_result != "SKIPPED"):
                         pause_seconds = self._get_youtube_pause_seconds()
                         self._sleep_with_countdown(pause_seconds, drop_level=1, with_padding=True)
+                    else:
+                        self._maybe_batch_throttle_after_track(index, number_of_tracks_new, drop_level=1)
                     
                     # Collect rate-limited tracks for retry
                     if download_result == "RATE_LIMITED":
