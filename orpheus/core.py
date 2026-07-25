@@ -47,7 +47,9 @@ class Orpheus:
             },
             "artist_downloading":{
                 "return_credited_albums": True,
-                "separate_tracks_skip_downloaded": True
+                "separate_tracks_skip_downloaded": True,
+                "prefer_highest_quality_edition": True,
+                "explicit_content": "prefer_explicit",
             },
             "formatting": {
                 "discography_format": "{name} {quality}",
@@ -65,7 +67,8 @@ class Orpheus:
             },
             "codecs": {
                 "proprietary_codecs": False,
-                "spatial_codecs": True
+                "spatial_codecs": True,
+                "include_dolby_atmos": False,
             },
             "module_defaults": {
                 "lyrics": "default",

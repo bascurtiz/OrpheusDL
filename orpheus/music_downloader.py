@@ -329,6 +329,7 @@ class Downloader:
         self._download_error_log_context = None
         self._download_error_count = 0
         self._discography_album_path_registry = {}
+        self._discography_album_info_cache = {}
 
     def _skip_existing_files_enabled(self) -> bool:
         """When True, skip tracks whose target file already exists."""
@@ -1013,7 +1014,7 @@ class Downloader:
         return info.pretty_name or codec.name
 
     # kwargs the GUI attaches for display/logging only — never valid module info-method args
-    _DISPLAY_ONLY_KWARGS = ('catalog_quality', 'display_quality')
+    _DISPLAY_ONLY_KWARGS = ('catalog_quality', 'display_quality', 'download_quality_override')
 
     @staticmethod
     def _filter_kwargs_for_method(method, kwargs) -> dict:
@@ -2373,6 +2374,264 @@ class Downloader:
     def _reset_discography_album_path_registry(self) -> None:
         """Clear per-discography album folder registry (artist/label downloads)."""
         self._discography_album_path_registry = {}
+        self._discography_album_info_cache = {}
+
+    # --- Discography edition grouping / quality priority (issue #116) ---
+
+    _VERSION_DISCRIMINANTS = (
+        'club remix', 'radio remix', 'extended mix', 'instrumental',
+        'deluxe', 'extended', 'anniversary', 'remaster', 'remastered',
+        'expanded', 'bonus', 'remix', 'live', 'acoustic', 'unplugged',
+        'karaoke', 'edit', 'version',
+    )
+
+    @staticmethod
+    def _is_atmos_quality_text(quality_str) -> bool:
+        if not quality_str:
+            return False
+        text = str(quality_str)
+        pu = text.upper()
+        return (
+            'ATMOS' in pu
+            or '◗◖' in text
+            or 'DOLBY' in pu
+            or ('SPATIAL' in pu and 'FLAC' not in pu)
+            or 'E-AC-3' in pu
+            or 'AC-4' in pu
+            or 'MPEG-H' in pu
+        )
+
+    @classmethod
+    def _is_hires_quality_text(cls, quality_str) -> bool:
+        if not quality_str:
+            return False
+        text = str(quality_str)
+        pu = text.upper()
+        if cls._is_atmos_quality_text(text):
+            # Atmos+Hi-Res badges: treat as Atmos for ranking (lower than stereo Hi-Res)
+            if not re.search(r'HI[\s\-_]*RES|🅷|ʜɪ', text, re.I):
+                return False
+            # Dual-badge catalogs still count as having hi-res capability for non-Atmos stereo pick
+        if re.search(r'HI[\s\-_]*RES', pu) or '🅷' in text or 'ʜɪ' in text.lower():
+            return True
+        # Sample-rate hints (e.g. "96kHz", "24bit/96")
+        if re.search(r'(?:2[0-9]|3[0-2])\s*bit', text, re.I) and re.search(r'(?:48\.?0*|88\.?2*|96|176|192)\s*k', text, re.I):
+            return True
+        if re.search(r'(?:88\.?2*|96|176|192)\s*kHz', text, re.I):
+            return True
+        return False
+
+    @classmethod
+    def _is_atmos_album(cls, album_info: AlbumInfo) -> bool:
+        """True when the catalog edition is Atmos-primary (no clear stereo Hi-Res/FLAC signal)."""
+        quality = getattr(album_info, 'quality', None) or ''
+        if not cls._is_atmos_quality_text(quality):
+            return False
+        # Dual-tagged stereo+Atmos catalog rows remain downloadable as stereo when Atmos is off
+        if cls._is_hires_quality_text(quality):
+            return False
+        pu = str(quality).upper()
+        if 'FLAC' in pu or 'LOSSLESS' in pu or 'ALAC' in pu:
+            return False
+        return True
+
+    @classmethod
+    def _album_quality_rank(cls, album_info: AlbumInfo) -> int:
+        """Higher is better: Hi-Res=3, FLAC/Lossless=2, Atmos=1, unknown=2."""
+        quality = getattr(album_info, 'quality', None) or ''
+        if cls._is_atmos_album(album_info):
+            return 1
+        if cls._is_hires_quality_text(quality):
+            return 3
+        if quality:
+            return 2
+        return 2
+
+    @classmethod
+    def _normalize_album_group_key(cls, album_info: AlbumInfo, explicit_mode: str = 'prefer_explicit') -> tuple:
+        """
+        Group key for duplicate edition detection.
+        Different version discriminants (Deluxe, Club Remix, …) stay separate.
+        When explicit_mode is 'both', explicit and clean are separate groups.
+        """
+        name = (getattr(album_info, 'name', None) or '').strip()
+        # Strip explicit/clean markers from title for grouping
+        base = re.sub(r'[\(\[\{]?\s*(explicit|clean|non[\s\-]?explicit)\s*[\)\]\}]?', '', name, flags=re.I)
+        base = base.lower()
+        base = unicodedata.normalize('NFKD', base)
+        base = ''.join(c for c in base if not unicodedata.combining(c))
+        base = re.sub(r'[^\w\s]', ' ', base)
+        base = re.sub(r'\s+', ' ', base).strip()
+
+        version = 'standard'
+        for token in cls._VERSION_DISCRIMINANTS:
+            if re.search(rf'\b{re.escape(token)}\b', name, flags=re.I):
+                version = token
+                break
+
+        upc = str(getattr(album_info, 'upc', None) or '').strip()
+        # UPC is not part of the group key — editions of the same album often differ or
+        # one side lacks UPC. Version discriminant already separates remixes/deluxe.
+
+        explicit_part = ''
+        if explicit_mode == 'both':
+            explicit_part = 'explicit' if getattr(album_info, 'explicit', False) else 'clean'
+
+        return (base, version, explicit_part)
+
+    def _fetch_album_info_for_discography(self, album_id: str, extra_kwargs=None):
+        """Fetch AlbumInfo, preferring the discography cache."""
+        album_id_str = str(album_id)
+        cached = self._discography_album_info_cache.get(album_id_str)
+        if cached is not None:
+            return cached
+        try:
+            album_info_kwargs = self._filter_kwargs_for_method(
+                self.service.get_album_info, extra_kwargs or {}
+            )
+            album_info = self.service.get_album_info(album_id_str, **album_info_kwargs)
+        except Exception as e:
+            if isinstance(e, SpotifyConfigError):
+                raise
+            logging.debug(f"Discography pre-scan: could not get album info for {album_id_str}: {e}")
+            return None
+        if album_info:
+            self._discography_album_info_cache[album_id_str] = album_info
+        return album_info
+
+    def _select_discography_albums(self, album_items, extra_kwargs=None) -> list:
+        """
+        Pre-scan artist/label albums: filter Atmos/explicit, optionally pick highest-quality
+        edition per group. Returns ordered list of album ID strings to download.
+        """
+        artist_settings = self.global_settings.get('artist_downloading') or {}
+        codecs_settings = self.global_settings.get('codecs') or {}
+        include_atmos = bool(codecs_settings.get('include_dolby_atmos', False))
+        prefer_highest = bool(artist_settings.get('prefer_highest_quality_edition', True))
+        explicit_mode = str(artist_settings.get('explicit_content', 'prefer_explicit') or 'prefer_explicit').lower()
+        if explicit_mode not in ('prefer_explicit', 'non_explicit_only', 'both'):
+            explicit_mode = 'prefer_explicit'
+
+        # Normalize album items → list of IDs
+        album_ids = []
+        for album_item in album_items or []:
+            if isinstance(album_item, (str, int)):
+                album_ids.append(str(album_item))
+            elif isinstance(album_item, dict) and album_item.get('id') is not None:
+                album_ids.append(str(album_item['id']))
+            elif hasattr(album_item, 'id') and getattr(album_item, 'id', None) is not None:
+                album_ids.append(str(album_item.id))
+            else:
+                self.print(f"Skipping unrecognized album item in discography: {album_item}")
+
+        if not album_ids:
+            return []
+
+        # Always apply Atmos skip + explicit filters; quality ranking when prefer_highest
+        self.print('Scanning discography editions for quality / Atmos / explicit preferences...')
+
+        entries = []  # {id, info, rank, atmos, explicit, group_key, name}
+        for album_id in album_ids:
+            info = self._fetch_album_info_for_discography(album_id, extra_kwargs)
+            if not info:
+                # Keep unknown albums when we cannot classify (avoid silent drops)
+                entries.append({
+                    'id': album_id,
+                    'info': None,
+                    'rank': 2,
+                    'atmos': False,
+                    'explicit': False,
+                    'group_key': (f'__unknown_{album_id}', 'standard', ''),
+                    'name': album_id,
+                })
+                continue
+            is_atmos = self._is_atmos_album(info)
+            if is_atmos and not include_atmos:
+                # Atmos-only skip: if quality text is atmos (possibly dual-tagged), skip when Atmos off
+                self.print(
+                    f'Skipping Atmos edition (Include Dolby Atmos is off): '
+                    f'{info.name or album_id} ({album_id})',
+                    drop_level=1,
+                )
+                continue
+            entries.append({
+                'id': album_id,
+                'info': info,
+                'rank': self._album_quality_rank(info),
+                'atmos': is_atmos,
+                'explicit': bool(getattr(info, 'explicit', False)),
+                'group_key': self._normalize_album_group_key(info, explicit_mode),
+                'name': info.name or album_id,
+            })
+
+        if not prefer_highest:
+            # Still honor explicit-only filters without quality dedup
+            selected = []
+            for e in entries:
+                if explicit_mode == 'non_explicit_only' and e['explicit']:
+                    self.print(
+                        f'Skipping explicit edition (non_explicit_only): {e["name"]} ({e["id"]})',
+                        drop_level=1,
+                    )
+                    continue
+                selected.append(e['id'])
+            return selected
+
+        # Group by key
+        groups = {}
+        for e in entries:
+            groups.setdefault(e['group_key'], []).append(e)
+
+        selected_ids = []
+        for group_key, members in groups.items():
+            # Explicit filtering within group
+            if explicit_mode == 'non_explicit_only':
+                clean = [m for m in members if not m['explicit']]
+                if not clean:
+                    for m in members:
+                        self.print(
+                            f'Skipping explicit-only album (non_explicit_only): {m["name"]} ({m["id"]})',
+                            drop_level=1,
+                        )
+                    continue
+                members = clean
+            elif explicit_mode == 'prefer_explicit':
+                explicit_members = [m for m in members if m['explicit']]
+                clean_members = [m for m in members if not m['explicit']]
+                if explicit_members and clean_members:
+                    for m in clean_members:
+                        self.print(
+                            f'Skipping clean edition (prefer_explicit): {m["name"]} ({m["id"]})',
+                            drop_level=1,
+                        )
+                    members = explicit_members
+                elif explicit_members:
+                    members = explicit_members
+                else:
+                    members = clean_members
+            # 'both': group_key already separates explicit/clean
+
+            if not members:
+                continue
+
+            # Prefer non-Atmos when ranks equal and Atmos is optional lowest priority
+            # Rank: Hi-Res=3 > FLAC=2 > Atmos=1
+            best = max(members, key=lambda m: (m['rank'], 0 if m['atmos'] else 1))
+            for m in members:
+                if m['id'] == best['id']:
+                    continue
+                reason = (
+                    f'Preferring {self._rank_label(best["rank"])} edition '
+                    f'"{best["name"]}" over {self._rank_label(m["rank"])} "{m["name"]}"'
+                )
+                self.print(reason, drop_level=1)
+            selected_ids.append(best['id'])
+
+        return selected_ids
+
+    @staticmethod
+    def _rank_label(rank: int) -> str:
+        return {3: 'Hi-Res', 2: 'FLAC', 1: 'Atmos'}.get(rank, 'unknown')
 
     def _disambiguate_discography_album_path(
         self,
@@ -2397,18 +2656,30 @@ class Downloader:
             return album_path
 
         suffixes = []
-        quality_for_suffix = quality_source or (album_info.quality if album_info else '')
-        if quality_for_suffix:
-            quality_suffix = self._album_quality_folder_suffix(quality_for_suffix)
-            if quality_suffix:
-                suffixes.append(quality_suffix)
-        if album_info and album_info.catalog_number:
-            suffixes.append(str(album_info.catalog_number))
+        # Avoid double-appending quality when the template already includes {quality}
+        # (e.g. "ALBUM [FLAC]" → "ALBUM [FLAC] [FLAC]"). Prefer version / catalog / ID.
+        formatted_upper = (album_path_formatted_name or '').upper()
+        quality_already_in_name = bool(
+            re.search(r'\[?\s*(FLAC|HI[\s\-_]*RES|ATMOS|OPUS|AAC|MP3|LOSSLESS)\s*\]?', formatted_upper)
+            or '🅷' in (album_path_formatted_name or '')
+            or '◗◖' in (album_path_formatted_name or '')
+        )
+        if not quality_already_in_name:
+            quality_for_suffix = quality_source or (album_info.quality if album_info else '')
+            if quality_for_suffix:
+                quality_suffix = self._album_quality_folder_suffix(quality_for_suffix)
+                if quality_suffix:
+                    suffixes.append(quality_suffix)
         album_name = (album_info.name if album_info else '') or ''
-        for hint in ('Deluxe', 'Extended', 'Anniversary', 'Remaster', 'Expanded', 'Bonus'):
+        for hint in (
+            'Club Remix', 'Radio Remix', 'Deluxe', 'Extended', 'Anniversary',
+            'Remaster', 'Expanded', 'Bonus', 'Remix', 'Live', 'Acoustic',
+        ):
             if re.search(rf'\b{re.escape(hint)}\b', album_name, flags=re.IGNORECASE):
                 suffixes.append(hint)
                 break
+        if album_info and album_info.catalog_number:
+            suffixes.append(str(album_info.catalog_number))
         suffixes.append(album_id_str)
 
         for suffix in suffixes:
@@ -2438,16 +2709,52 @@ class Downloader:
 
     def _resolve_album_quality_source(self, album_info: AlbumInfo, extra_kwargs=None) -> str:
         """
-        Best available quality string for folder naming.
+        Quality string for folder naming — reflects the *downloaded/requested* stream tier,
+        not the catalog/search badge (issue #116).
 
-        Prefers the catalog/search label (e.g. "🅷 HI-RES") since modules often report a
-        bare codec like "FLAC" for Hi-Res albums.
+        Caps catalog capability by general.download_quality:
+        - user chose lossless → label FLAC even if catalog is Hi-Res
+        - user chose hifi + album is Hi-Res → HI-RES
+        - Atmos stream request → ATMOS
         """
+        download_quality = str(
+            self.global_settings.get('general', {}).get('download_quality', 'hifi') or 'hifi'
+        ).lower()
+        catalog = ''
         if isinstance(extra_kwargs, dict):
-            catalog = extra_kwargs.get('catalog_quality') or extra_kwargs.get('display_quality')
-            if catalog:
-                return str(catalog)
-        return str(album_info.quality) if album_info and album_info.quality else ''
+            catalog = str(
+                extra_kwargs.get('catalog_quality')
+                or extra_kwargs.get('display_quality')
+                or ''
+            ).strip()
+        if not catalog and album_info and album_info.quality:
+            catalog = str(album_info.quality)
+
+        if download_quality == 'atmos':
+            return 'ATMOS'
+
+        album_is_atmos = self._is_atmos_album(album_info) if album_info else False
+        album_is_hires = self._is_hires_quality_text(catalog) if catalog else False
+
+        if download_quality in ('high', 'medium', 'low', 'minimum'):
+            # Lossy tiers — use a simple label from the setting
+            return download_quality.upper() if download_quality != 'minimum' else 'LOW'
+
+        if download_quality == 'lossless':
+            # Requested CD lossless even if catalog is Hi-Res
+            return 'FLAC'
+
+        # hifi (or unknown): use best the album can provide under this request
+        if album_is_atmos and bool(self.global_settings.get('codecs', {}).get('include_dolby_atmos', False)):
+            return 'ATMOS'
+        if album_is_hires:
+            return 'HI-RES'
+        if catalog:
+            # Prefer derived path label parts from catalog but without upgrading past request
+            if self._is_atmos_quality_text(catalog) and not album_is_hires:
+                return 'FLAC'  # stereo fallback label when not treating as atmos edition
+            return catalog
+        return 'FLAC'
 
     def _create_album_location(
         self,
@@ -2824,8 +3131,13 @@ class Downloader:
         self.set_indent_number(1)
         self.print(f'Fetching data. Please wait...')
         try:
-            album_info_kwargs = self._filter_kwargs_for_method(self.service.get_album_info, extra_kwargs)
-            album_info: AlbumInfo = self.service.get_album_info(album_id, **album_info_kwargs)
+            album_id_str = str(album_id)
+            album_info = self._discography_album_info_cache.get(album_id_str)
+            if album_info is None:
+                album_info_kwargs = self._filter_kwargs_for_method(self.service.get_album_info, extra_kwargs)
+                album_info: AlbumInfo = self.service.get_album_info(album_id, **album_info_kwargs)
+                if album_info:
+                    self._discography_album_info_cache[album_id_str] = album_info
         except Exception as e:
             if isinstance(e, SpotifyConfigError):
                 raise
@@ -3266,25 +3578,19 @@ class Downloader:
         self._reset_discography_album_path_registry()
 
         tracks_downloaded = []
-        for index, album_item in enumerate(artist_info.albums, start=1):
+        selected_album_ids = self._select_discography_albums(
+            artist_info.albums,
+            extra_kwargs=artist_info.album_extra_kwargs,
+        )
+        number_of_albums = len(selected_album_ids)
+        if number_of_albums != len(artist_info.albums or []):
+            self.print(f'Albums after edition filter: {number_of_albums!s}')
+
+        for index, album_id_to_process in enumerate(selected_album_ids, start=1):
             # Ensure consistent indentation for Album headers (8 spaces)
             self.set_indent_number(1)
             self.print(f'Album {index}/{number_of_albums}')
 
-            album_id_to_process = None
-            # Check if album_item is a string or integer (like for Tidal, SoundCloud)
-            if isinstance(album_item, (str, int)):
-                album_id_to_process = str(album_item)
-            # Check if album_item is a dictionary with an 'id' key (like for Spotify)
-            elif isinstance(album_item, dict) and 'id' in album_item and isinstance(album_item['id'], (str, int)):
-                album_id_to_process = str(album_item['id'])
-            # Check if album_item is an object with an 'id' attribute (more generic)
-            elif hasattr(album_item, 'id') and isinstance(getattr(album_item, 'id', None), (str, int)):
-                 album_id_to_process = str(album_item.id) # type: ignore
-            else:
-                self.print(f"Skipping unrecognized album item in artist_info.albums: {album_item}")
-                continue
-            
             tracks_downloaded += self.download_album(
                 album_id_to_process, # This is now guaranteed to be a string ID
                 artist_name=artist_name,
@@ -3509,12 +3815,17 @@ class Downloader:
         self._reset_discography_album_path_registry()
 
         tracks_downloaded = []
-        for index, album_item in enumerate(label_info.albums or [], start=1):
+        selected_album_ids = self._select_discography_albums(
+            label_info.albums or [],
+            extra_kwargs=label_info.album_extra_kwargs or {},
+        )
+        number_of_albums = len(selected_album_ids)
+        if number_of_albums != len(label_info.albums or []):
+            self.print(f'Releases after edition filter: {number_of_albums!s}')
+
+        for index, album_id_to_process in enumerate(selected_album_ids, start=1):
             self.set_indent_number(1)
             self.print(f'Release {index}/{number_of_albums}')
-            album_id_to_process = str(album_item) if isinstance(album_item, (str, int)) else (album_item.get('id') if isinstance(album_item, dict) else None)
-            if not album_id_to_process:
-                continue
             tracks_downloaded += self.download_album(
                 album_id_to_process,
                 artist_name=label_name,
