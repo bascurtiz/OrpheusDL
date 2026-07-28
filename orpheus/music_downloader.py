@@ -2675,6 +2675,14 @@ class Downloader:
             logging.warning(f"Could not retrieve album info for {album_id} from {self.service_name}. Skipping album.")
             return []
 
+        album_artist_to_filter = extra_kwargs.pop('album_artist_to_filter');
+        if(album_artist_to_filter and len(album_info.album_artist) > 0):
+            print('Artist name provided in kwargs, ensuring the album being downloaded contains this album artist.')
+            if(album_artist_to_filter.lower() not in [artist.lower() for artist in album_info.album_artist]):
+                self.print(f'Album {album_info.id} does not have {album_artist_to_filter} as an album artist', drop_level=1)
+                return []
+
+            
         number_of_tracks = len(album_info.tracks)
         self._current_disc_track_totals = self._compute_disc_track_totals(album_info.tracks)
 
@@ -3103,8 +3111,31 @@ class Downloader:
         self._reset_discography_album_path_registry()
 
         tracks_downloaded = []
-        for index, album_item in enumerate(artist_info.albums, start=1):
+        isrc_list = []
+        skip_album_is_single_that_exists = False
+        for index, album_item in enumerate(sorted(artist_info.albums, key=lambda x: int(re.search(r'\d+', x['additional'][0]).group()), reverse=True), start=1):
             # Ensure consistent indentation for Album headers (8 spaces)
+            album_info: AlbumInfo = self.service.get_album_info(album_item['id'])
+            quality_tier = QualityEnum[self.global_settings['general']['download_quality'].upper()]
+            codec_options = CodecOptions(
+                spatial_codecs = self.global_settings['codecs']['spatial_codecs'],
+                proprietary_codecs = self.global_settings['codecs']['proprietary_codecs'],
+            )
+
+            album_has_single_track = len(album_info.tracks) == 1
+
+            for track in album_info.tracks:
+                try:
+                    track_info:TrackInfo = self.service.get_track_info(track, quality_tier, codec_options, extra_kwargs)
+                    if track_info.tags.isrc:
+                        if album_has_single_track and track_info.tags.isrc in isrc_list:
+                            skip_album_is_single_that_exists = True
+                        else:
+                            isrc_list.append(track_info.tags.isrc)
+                except Exception as e:
+                    continue
+
+
             self.set_indent_number(1)
             self.print(f'Album {index}/{number_of_albums}')
 
@@ -3121,20 +3152,37 @@ class Downloader:
             else:
                 self.print(f"Skipping unrecognized album item in artist_info.albums: {album_item}")
                 continue
-            
-            tracks_downloaded += self.download_album(
-                album_id_to_process, # This is now guaranteed to be a string ID
-                artist_name=artist_name,
-                path=artist_path,
-                indent_level=2,
-                extra_kwargs=artist_info.album_extra_kwargs, # General extra_kwargs from artist level
-                artist_album_index=index,
-                artist_album_count=number_of_albums,
-            )
+            artist_info.album_extra_kwargs.update({'album_artist_to_filter': artist_info.name})
+            if not skip_album_is_single_that_exists:
+                tracks_downloaded += self.download_album(
+                    album_id_to_process, # This is now guaranteed to be a string ID
+                    artist_name=artist_name,
+                    path=artist_path,
+                    indent_level=2,
+                    extra_kwargs=artist_info.album_extra_kwargs, # General extra_kwargs from artist level
+                    artist_album_index=index,
+                    artist_album_count=number_of_albums,
+                )
+            else:
+                self.print(f"Skipping single-track album {album_id_to_process} as its track already exists in the artist's downloads.", drop_level=2)
+                skip_album_is_single_that_exists = False  # Reset for next album
 
         self.set_indent_number(2)
         skip_tracks = self.global_settings['artist_downloading']['separate_tracks_skip_downloaded']
-        tracks_to_download = [i for i in artist_info.tracks if (i not in tracks_downloaded and skip_tracks) or not skip_tracks]
+
+        tracks_to_download = []
+        singles_isrc = []
+
+        for artist_track in artist_info.tracks:
+            track_info:TrackInfo = self.service.get_track_info(artist_track, quality_tier, codec_options, extra_kwargs)
+            singles_isrc.append(track_info.tags.isrc)
+            if (track_info.tags.isrc not in isrc_list and skip_tracks) or not skip_tracks:
+                print(f"Track {artist_track} will be downloaded. ISRC: {track_info.tags.isrc}")
+                tracks_to_download.append(artist_track)
+            else:
+                print(f"Track {artist_track} will NOT be downloaded, is duplicate. ISRC: {track_info.tags.isrc}")
+
+        # tracks_to_download = [i for i in artist_info.tracks if (i not in tracks_downloaded and skip_tracks) or not skip_tracks]
         
         # Apple Music returns "top songs" on artist endpoints, which can duplicate
         # tracks already covered by album downloads. Keep artist mode album-only.
