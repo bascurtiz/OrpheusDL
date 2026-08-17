@@ -58,6 +58,8 @@ Follow these steps to get a local copy of Orpheus up and running:
        <sub>*(use python3 on macOS)*</sub><br>
 
 5. Install modules:<br>   
+   Amazon Music:
+   `git clone https://github.com/bascurtiz/orpheusdl-amazonmusic modules/amazonmusic`<br>
    Apple Music:
    `git clone https://github.com/bascurtiz/orpheusdl-applemusic modules/applemusic`<br>
    Beatport:
