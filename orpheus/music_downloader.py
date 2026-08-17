@@ -1046,6 +1046,32 @@ class Downloader:
                 return 'HI-RES'
         return info.pretty_name or codec.name
 
+    def _maybe_warn_codec_fallback(self, track_info) -> None:
+        """Warn when a lossless/Atmos request silently resolved to a lossy stream.
+
+        The album folder's {quality} label is derived from the requested tier, so a
+        per-track fallback to AAC would otherwise leave the folder saying
+        "FLAC"/"Lossless" while the actual file is lossy.
+        """
+        if not track_info:
+            return
+        codec = getattr(track_info, 'codec', None)
+        if not codec:
+            return
+        requested = str(
+            self.global_settings.get('general', {}).get('download_quality', 'hifi') or 'hifi'
+        ).lower()
+        if requested not in ('hifi', 'lossless', 'atmos'):
+            return
+        info = codec_data.get(codec)
+        if not info or info.lossless or info.spatial:
+            return
+        name = getattr(track_info, 'name', None) or 'track'
+        self.print(
+            f'⚠ {name}: requested {requested} but the stream fell back to {info.pretty_name} (lossy)',
+            drop_level=1,
+        )
+
     # kwargs the GUI attaches for display/logging only — never valid module info-method args
     _DISPLAY_ONLY_KWARGS = ('catalog_quality', 'display_quality', 'download_quality_override')
 
@@ -2727,7 +2753,14 @@ class Downloader:
         """
         artist_settings = self.global_settings.get('artist_downloading') or {}
         codecs_settings = self.global_settings.get('codecs') or {}
-        include_atmos = bool(codecs_settings.get('include_dolby_atmos', False))
+        download_quality = str(
+            self.global_settings.get('general', {}).get('download_quality', 'hifi') or 'hifi'
+        ).lower()
+        # "Include Dolby Atmos" only pulls Atmos-only editions when the user is
+        # actually requesting the Atmos stream tier. At lossless/lossy tiers these
+        # rows have no stereo lossless master and would silently fall back to AAC,
+        # so they're always skipped unless Atmos itself is requested.
+        include_atmos = download_quality == 'atmos' and bool(codecs_settings.get('include_dolby_atmos', False))
         prefer_highest = bool(artist_settings.get('prefer_highest_quality_edition', True))
         explicit_mode = str(artist_settings.get('explicit_content', 'prefer_explicit') or 'prefer_explicit').lower()
         if explicit_mode not in ('prefer_explicit', 'non_explicit_only', 'both'):
@@ -2769,8 +2802,9 @@ class Downloader:
             is_atmos = self._is_atmos_album(info)
             if is_atmos and not include_atmos:
                 # Atmos-only skip: if quality text is atmos (possibly dual-tagged), skip when Atmos off
+                reason = 'Include Dolby Atmos is off' if download_quality == 'atmos' else 'Dolby Atmos quality not selected'
                 self.print(
-                    f'Skipping Atmos edition (Include Dolby Atmos is off): '
+                    f'Skipping Atmos edition ({reason}): '
                     f'{info.name or album_id} ({album_id})',
                     drop_level=1,
                 )
@@ -2954,20 +2988,31 @@ class Downloader:
         if download_quality == 'atmos':
             return 'ATMOS'
 
-        album_is_atmos = self._is_atmos_album(album_info) if album_info else False
         album_is_hires = self._is_hires_quality_text(catalog) if catalog else False
+
+        # Apple Music has no stereo lossless master for Atmos-only or lossy-only
+        # catalog rows, so requesting lossless/hifi actually falls back to AAC.
+        apple_lossy_only = False
+        if album_info and str(getattr(self, 'service_name', '') or '').lower() in ('applemusic', 'apple music'):
+            album_q = str(getattr(album_info, 'quality', '') or '').strip()
+            apple_lossy_only = self._is_atmos_album(album_info) or not album_q
 
         if download_quality in ('high', 'medium', 'low', 'minimum'):
             # Lossy tiers — use a simple label from the setting
             return download_quality.upper() if download_quality != 'minimum' else 'LOW'
 
         if download_quality == 'lossless':
+            if apple_lossy_only:
+                return 'AAC'
             # Requested CD lossless even if catalog is Hi-Res
             return 'FLAC'
 
-        # hifi (or unknown): use best the album can provide under this request
-        if album_is_atmos and bool(self.global_settings.get('codecs', {}).get('include_dolby_atmos', False)):
-            return 'ATMOS'
+        # hifi (or unknown): use best the album can provide under this request.
+        # "Include Dolby Atmos" only controls which discography edition is picked,
+        # not the requested stream tier, so an Atmos-tagged catalog row must still
+        # resolve to its stereo/lossless label when the user did not request Atmos.
+        if apple_lossy_only:
+            return 'AAC'
         if album_is_hires:
             return 'HI-RES'
         if catalog:
@@ -4216,6 +4261,7 @@ class Downloader:
         if track_id is None:
             track_id = track_info.id
 
+        self._maybe_warn_codec_fallback(track_info)
         self._apply_track_index_to_tags(track_info, track_index, number_of_tracks)
             
         # Check if track already exists (for backward compatibility) - use thread pool for file checks
@@ -4752,6 +4798,8 @@ class Downloader:
                     codec_info.append(f'sample rate: {track_info.sample_rate}kHz')
 
             d_print(', '.join(codec_info))
+
+        self._maybe_warn_codec_fallback(track_info)
 
         # Playlist index vs album track number (see formatting.use_playlist_position)
         self._apply_track_index_to_tags(track_info, track_index, number_of_tracks)
