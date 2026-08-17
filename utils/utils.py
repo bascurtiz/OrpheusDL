@@ -193,23 +193,30 @@ def resolve_filename_separator(formatting: dict | None = None) -> str:
     return str(sep)
 
 
-def format_album_artist_tag(artist_data, separator: str = ', ') -> str:
-    """Join multiple album artists for embedded metadata display."""
+def format_album_artist_tag(artist_data, separator: str = ', ', primary_only: bool = False) -> str:
+    """Join multiple album artists for embedded metadata display.
+
+    With primary_only=True, only the first/primary artist is returned — used for the
+    ALBUMARTIST tag so collaboration albums are filed under one primary artist instead
+    of every credited artist.
+    """
     if isinstance(artist_data, list):
         names = _dedupe_artist_names(artist_data)
     else:
         names = parse_multi_artist_name(artist_data)
     if not names:
         return ''
+    if primary_only:
+        return names[0]
     return separator.join(names) if len(names) > 1 else names[0]
 
 
-def resolve_album_artist_tag(*sources, separator: str = ', ') -> str:
+def resolve_album_artist_tag(*sources, separator: str = ', ', primary_only: bool = False) -> str:
     """Pick the first usable album-artist source and normalize separators."""
     for source in sources:
         if not source:
             continue
-        formatted = format_album_artist_tag(source, separator=separator)
+        formatted = format_album_artist_tag(source, separator=separator, primary_only=primary_only)
         if formatted:
             return formatted
     return ''
