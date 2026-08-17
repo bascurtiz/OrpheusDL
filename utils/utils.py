@@ -189,7 +189,7 @@ def resolve_filename_separator(formatting: dict | None = None) -> str:
     fmt = formatting or {}
     sep = fmt.get('filename_separator')
     if sep is None or (isinstance(sep, str) and sep == ''):
-        return fmt.get('metadata_separator', ';')
+        return fmt.get('metadata_separator', ', ')
     return str(sep)
 
 

@@ -109,7 +109,7 @@ def _ogg_tags_appear_written(file_path: str) -> bool:
         return False
 
 
-def tag_file(file_path: str, image_path: str, track_info: TrackInfo, credits_list: list, embedded_lyrics: str, container: ContainerEnum, metadata_separator: str = ';', split_metadata: bool = True, enable_zfill: bool = False, _repair_retry: bool = False, service_name: str = ''):
+def tag_file(file_path: str, image_path: str, track_info: TrackInfo, credits_list: list, embedded_lyrics: str, container: ContainerEnum, metadata_separator: str = ', ', split_metadata: bool = False, enable_zfill: bool = False, _repair_retry: bool = False, service_name: str = ''):
     if container == ContainerEnum.flac:
         tagger = FLAC(file_path)
     elif container == ContainerEnum.opus:

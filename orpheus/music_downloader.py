@@ -3034,7 +3034,7 @@ class Downloader:
         album_artist = (extra_kwargs or {}).get('album_artist')
         if not album_artist:
             return
-        meta_sep = self.global_settings['formatting'].get('metadata_separator', ';')
+        meta_sep = self.global_settings['formatting'].get('metadata_separator', ', ')
         track_info.tags.album_artist = format_album_artist_tag(album_artist, meta_sep)
 
     def _apply_track_index_to_tags(self, track_info: TrackInfo, track_index: int, number_of_tracks: int) -> None:
@@ -4344,8 +4344,8 @@ class Downloader:
             if container in tagging_supported_containers:
                 # Tag the converted file - only pass artwork_path if embed_cover is enabled
                 embed_artwork_path = artwork_path if self.global_settings['covers']['embed_cover'] else None
-                meta_sep = self.global_settings['formatting'].get('metadata_separator', ';')
-                split_meta = self.global_settings['formatting'].get('split_metadata', True)
+                meta_sep = self.global_settings['formatting'].get('metadata_separator', ', ')
+                split_meta = self.global_settings['formatting'].get('split_metadata', False)
                 enable_zfill = self.global_settings['formatting'].get('enable_zfill', False)
                 tag_file(final_location, embed_artwork_path, track_info, credits_list, embedded_lyrics, container, metadata_separator=meta_sep, split_metadata=split_meta, enable_zfill=enable_zfill, service_name=self._service_display_name())
             else:
@@ -4370,8 +4370,8 @@ class Downloader:
             if old_track_location and old_container:
                 if old_container in tagging_supported_containers:
                     embed_artwork_path = artwork_path if self.global_settings['covers']['embed_cover'] else None
-                    meta_sep = self.global_settings['formatting'].get('metadata_separator', ';')
-                    split_meta = self.global_settings['formatting'].get('split_metadata', True)
+                    meta_sep = self.global_settings['formatting'].get('metadata_separator', ', ')
+                    split_meta = self.global_settings['formatting'].get('split_metadata', False)
                     tag_file(old_track_location, embed_artwork_path, track_info, credits_list, embedded_lyrics, old_container, metadata_separator=meta_sep, split_metadata=split_meta, enable_zfill=enable_zfill, service_name=self._service_display_name())
                 else:
                     pass  # Skip tagging for unsupported containers
@@ -5095,8 +5095,8 @@ class Downloader:
             if container in tagging_supported_containers:
                 # Tag the converted file - only pass artwork_path if embed_cover is enabled
                 embed_artwork_path = artwork_path if self.global_settings['covers']['embed_cover'] else None
-                meta_sep = self.global_settings['formatting'].get('metadata_separator', ';')
-                split_meta = self.global_settings['formatting'].get('split_metadata', True)
+                meta_sep = self.global_settings['formatting'].get('metadata_separator', ', ')
+                split_meta = self.global_settings['formatting'].get('split_metadata', False)
                 enable_zfill = self.global_settings['formatting'].get('enable_zfill', False)
                 tag_file(final_location, embed_artwork_path, track_info, credits_list, embedded_lyrics, container, metadata_separator=meta_sep, split_metadata=split_meta, enable_zfill=enable_zfill, service_name=self._service_display_name())
             else:
@@ -5119,8 +5119,8 @@ class Downloader:
             if old_track_location and old_container:
                 if old_container in tagging_supported_containers:
                     embed_artwork_path = artwork_path if self.global_settings['covers']['embed_cover'] else None
-                    meta_sep = self.global_settings['formatting'].get('metadata_separator', ';')
-                    split_meta = self.global_settings['formatting'].get('split_metadata', True)
+                    meta_sep = self.global_settings['formatting'].get('metadata_separator', ', ')
+                    split_meta = self.global_settings['formatting'].get('split_metadata', False)
                     tag_file(old_track_location, embed_artwork_path, track_info, credits_list, embedded_lyrics, old_container, metadata_separator=meta_sep, split_metadata=split_meta, enable_zfill=enable_zfill, service_name=self._service_display_name())
                 else:
                     pass  # Skip tagging for unsupported containers
