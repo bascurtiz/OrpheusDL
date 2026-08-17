@@ -348,6 +348,11 @@ class Downloader:
         """When True, skip tracks whose target file already exists."""
         return bool(self.global_settings.get('advanced', {}).get('ignore_existing_files', False))
 
+    def _merge_same_name_albums_enabled(self) -> bool:
+        """When True, same-name editions of an album merge into one folder during
+        discography downloads (track conflicts are resolved by duration)."""
+        return bool(self.global_settings.get('artist_downloading', {}).get('merge_same_name_albums', False))
+
     def _platform_folder_name(self) -> str:
         """Display name of the source platform (e.g. 'Apple Music'), used for per-platform subfolders."""
         raw = ''
@@ -377,6 +382,61 @@ class Downloader:
                 os.remove(track_location)
         except OSError:
             pass
+
+    def _get_audio_duration_seconds(self, file_path: str):
+        """Duration (seconds) of an existing audio file, or None if unreadable."""
+        if not file_path or not os.path.isfile(file_path):
+            return None
+        try:
+            import mutagen
+            mf = mutagen.File(file_path)
+            if mf is not None and getattr(mf, 'info', None) is not None:
+                length = getattr(mf.info, 'length', None)
+                if length:
+                    return float(length)
+        except Exception:
+            pass
+        return None
+
+    def _resolve_track_filename_conflict(self, track_location: str, track_info):
+        """
+        Resolve same-name track collisions when merging editions into one folder.
+
+        Returns the path to download to, or None when the track is a duplicate that
+        should be skipped (an existing file already holds the same duration).
+        """
+        if not self._merge_same_name_albums_enabled():
+            return track_location
+        if not track_location or not os.path.isfile(track_location):
+            return track_location
+
+        new_duration = getattr(track_info, 'duration', None)
+        if new_duration is None:
+            return track_location
+        try:
+            new_duration = float(new_duration)
+        except (TypeError, ValueError):
+            return track_location
+
+        tolerance = 1.0  # seconds
+        existing = self._get_audio_duration_seconds(track_location)
+        if existing is None:
+            return track_location
+        if abs(existing - new_duration) <= tolerance:
+            return None  # duplicate — skip
+
+        # Different duration: find an available numbered variant, or skip when an
+        # existing variant already holds this exact track.
+        base, ext = os.path.splitext(track_location)
+        n = 2
+        while True:
+            candidate = f'{base} ({n}){ext}'
+            if not os.path.isfile(candidate):
+                return candidate
+            cand_duration = self._get_audio_duration_seconds(candidate)
+            if cand_duration is not None and abs(cand_duration - new_duration) <= tolerance:
+                return None  # a numbered variant already holds this track
+            n += 1
 
     def _normalize_error_log_dir(self, output_dir: str) -> str:
         if not output_dir:
@@ -2435,55 +2495,6 @@ class Downloader:
         folder = truncate_utf8_bytes_keep_suffix(folder, 120).rstrip(' .-_\u2026')
         return folder or 'Unknown Album'
 
-    _ALBUM_FOLDER_ID_MARKER = '.orpheus_album_id'
-
-    @staticmethod
-    def _album_folder_id_marker_path(album_path: str) -> str:
-        return os.path.join(album_path.rstrip('/\\'), Downloader._ALBUM_FOLDER_ID_MARKER)
-
-    @staticmethod
-    def _read_album_folder_id(album_path: str) -> str:
-        """Return the album id previously stored in this folder, if any."""
-        marker = Downloader._album_folder_id_marker_path(album_path)
-        try:
-            if os.path.isfile(marker):
-                with open(marker, 'r', encoding='utf-8') as f:
-                    return (f.read() or '').strip()
-        except OSError:
-            pass
-        return ''
-
-    @staticmethod
-    def _write_album_folder_id(album_path: str, album_id: str) -> None:
-        """Persist album id so later editions with the same folder name can be separated."""
-        if not album_path or not album_id:
-            return
-        try:
-            os.makedirs(album_path, exist_ok=True)
-            with open(Downloader._album_folder_id_marker_path(album_path), 'w', encoding='utf-8') as f:
-                f.write(str(album_id).strip() + '\n')
-        except OSError:
-            pass
-
-    def _folder_belongs_to_other_album(self, album_path: str, album_id: str) -> bool:
-        """
-        Detect when a formatted album path is already used by a different catalog album.
-
-        Without this, Standard/Deluxe (or Hi-Res/Atmos) editions that share a name land in
-        one folder and ignore_existing_files skips overlapping tracks from the second edition.
-        """
-        album_id_str = str(album_id).strip()
-        if not album_id_str:
-            return False
-
-        existing_id = self._read_album_folder_id(album_path)
-        if existing_id:
-            return existing_id != album_id_str
-
-        # Legacy folders (no marker yet): do not treat as a foreign album.
-        # Re-downloads of the same album can still resume in-place; the marker is written
-        # on this pass so later editions with the same folder name are separated.
-        return False
     @staticmethod
     def _sanitize_formatted_folder_path(formatted: str) -> str:
         """
@@ -2634,6 +2645,29 @@ class Downloader:
 
         return (base, version, explicit_part)
 
+    @classmethod
+    def _normalize_album_merge_key(cls, album_info: AlbumInfo, explicit_mode: str = 'prefer_explicit') -> tuple:
+        """
+        Merge group key: base name with parenthetical/bracket suffixes (version hints
+        like '(Radio Remix)' or '[Deluxe]') and explicit markers stripped, so multiple
+        editions of the same release collapse into one group for merge_same_name_albums.
+        """
+        name = (getattr(album_info, 'name', None) or '').strip()
+        # Drop parenthetical/bracket content entirely for merge grouping
+        name = re.sub(r'[\(\[\{][^\)\]\}]*[\)\]\}]', ' ', name)
+        base = re.sub(r'[\s]*(explicit|clean|non[\s\-]?explicit)[\s]*', ' ', name, flags=re.I)
+        base = base.lower()
+        base = unicodedata.normalize('NFKD', base)
+        base = ''.join(c for c in base if not unicodedata.combining(c))
+        base = re.sub(r'[^\w\s]', ' ', base)
+        base = re.sub(r'\s+', ' ', base).strip()
+
+        explicit_part = ''
+        if explicit_mode == 'both':
+            explicit_part = 'explicit' if getattr(album_info, 'explicit', False) else 'clean'
+
+        return (base, explicit_part)
+
     def _fetch_album_info_for_discography(self, album_id: str, extra_kwargs=None):
         """Fetch AlbumInfo, preferring the discography cache."""
         album_id_str = str(album_id)
@@ -2762,6 +2796,7 @@ class Downloader:
         # so they're always skipped unless Atmos itself is requested.
         include_atmos = download_quality == 'atmos' and bool(codecs_settings.get('include_dolby_atmos', False))
         prefer_highest = bool(artist_settings.get('prefer_highest_quality_edition', True))
+        merge_enabled = self._merge_same_name_albums_enabled()
         explicit_mode = str(artist_settings.get('explicit_content', 'prefer_explicit') or 'prefer_explicit').lower()
         if explicit_mode not in ('prefer_explicit', 'non_explicit_only', 'both'):
             explicit_mode = 'prefer_explicit'
@@ -2796,6 +2831,7 @@ class Downloader:
                     'atmos': False,
                     'explicit': False,
                     'group_key': (f'__unknown_{album_id}', 'standard', ''),
+                    'merge_key': (f'__unknown_{album_id}', ''),
                     'name': album_id,
                 })
                 continue
@@ -2816,6 +2852,7 @@ class Downloader:
                 'atmos': is_atmos,
                 'explicit': bool(getattr(info, 'explicit', False)),
                 'group_key': self._normalize_album_group_key(info, explicit_mode),
+                'merge_key': self._normalize_album_merge_key(info, explicit_mode),
                 'name': info.name or album_id,
             })
 
@@ -2832,10 +2869,12 @@ class Downloader:
                 selected.append(e['id'])
             return selected
 
-        # Group by key
+        # Group by key (merge key when merge_same_name_albums is enabled, so Club
+        # Remix / Radio Remix / Deluxe editions of the same release collapse together).
+        group_attr = 'merge_key' if merge_enabled else 'group_key'
         groups = {}
         for e in entries:
-            groups.setdefault(e['group_key'], []).append(e)
+            groups.setdefault(e[group_attr], []).append(e)
 
         selected_ids = []
         for group_key, members in groups.items():
@@ -2867,6 +2906,22 @@ class Downloader:
             # 'both': group_key already separates explicit/clean
 
             if not members:
+                continue
+
+            best_rank = max(m['rank'] for m in members)
+            if merge_enabled:
+                # Merge every edition at the best rank into one folder; the track
+                # conflict resolver dedups/renames files at download time.
+                best_names = [m['name'] for m in members if m['rank'] == best_rank]
+                for m in members:
+                    if m['rank'] < best_rank:
+                        preview = ', '.join(best_names[:2]) or '? '
+                        self.print(
+                            f'Preferring {self._rank_label(best_rank)} edition(s) '
+                            f'({preview}) over {self._rank_label(m["rank"])} "{m["name"]}"',
+                            drop_level=1,
+                        )
+                selected_ids.extend(m['id'] for m in members if m['rank'] == best_rank)
                 continue
 
             # Prefer non-Atmos when ranks equal and Atmos is optional lowest priority
@@ -2902,9 +2957,14 @@ class Downloader:
         norm_key = os.path.normpath(album_path.rstrip('/\\'))
         album_id_str = str(album_id)
 
+        if self._merge_same_name_albums_enabled():
+            # Merge same-name editions into one folder; per-track conflicts are
+            # resolved by duration at download time.
+            registry[norm_key] = album_id_str
+            return album_path
+
         claimed_id = registry.get(norm_key)
-        disk_foreign = self._folder_belongs_to_other_album(album_path, album_id_str)
-        path_available = (claimed_id in (None, album_id_str)) and not disk_foreign
+        path_available = claimed_id in (None, album_id_str)
 
         if path_available:
             registry[norm_key] = album_id_str
@@ -2948,8 +3008,6 @@ class Downloader:
                 continue
             claimed = registry.get(candidate_key)
             if claimed not in (None, album_id_str):
-                continue
-            if self._folder_belongs_to_other_album(candidate, album_id_str):
                 continue
             registry[candidate_key] = album_id_str
             folder_name = os.path.basename(candidate.rstrip('/\\'))
@@ -3080,7 +3138,6 @@ class Downloader:
             quality_source=quality_source,
         )
         os.makedirs(album_path, exist_ok=True)
-        self._write_album_folder_id(album_path, album_id)
 
         return album_path
 
@@ -3448,6 +3505,24 @@ class Downloader:
 
         path = self._platform_base_path() if not path else path
         use_discography_format = self._path_is_nested_discography_container(path)
+
+        # Collaboration albums during discography downloads (issue #116): when enabled,
+        # albums whose album artist differs from the discography artist are placed under
+        # a folder named after the album's actual artist instead of the discography artist.
+        # This changes the parent path (not a tag), so it works for any format template.
+        if (
+            use_discography_format
+            and self.global_settings.get('formatting', {}).get('use_album_artist_for_discography', False)
+            and getattr(album_info, 'artist', None)
+        ):
+            discography_artist_folder = os.path.basename(path.rstrip('/\\'))
+            album_artist_folder = sanitise_name(str(album_info.artist))
+            if album_artist_folder.lower() != discography_artist_folder.lower():
+                new_base = os.path.dirname(path.rstrip('/\\'))
+                redirected = os.path.join(new_base, album_artist_folder) + '/'
+                if os.path.normpath(redirected.rstrip('/\\')) != os.path.normpath(path.rstrip('/\\')):
+                    path = redirected
+                    os.makedirs(path, exist_ok=True)
 
         if number_of_tracks > 1 or self.global_settings['formatting']['force_album_format']:
             # Creates the album_location folders
@@ -4275,6 +4350,11 @@ class Downloader:
             override_codec=getattr(download_info, 'different_codec', None),
             extra_kwargs=extra_kwargs
         )
+        # Merge-mode dedup: skip duplicate same-duration tracks, rename different-duration ones.
+        resolved_location = self._resolve_track_filename_conflict(track_location, track_info)
+        if resolved_location is None:
+            return "ALREADY_EXISTS"
+        track_location = resolved_location
         # Ensure parent directory exists for custom single path formats that include subfolders.
         track_parent_dir = os.path.dirname(track_location)
         if track_parent_dir:
@@ -4810,6 +4890,21 @@ class Downloader:
             album_location = self._platform_base_path()
         track_location = self._create_track_location(album_location, track_info, extra_kwargs=extra_kwargs)
 
+        # Merge-mode dedup: when merging same-name editions, skip tracks that already
+        # exist with the same duration and rename same-name/different-duration tracks.
+        resolved_location = self._resolve_track_filename_conflict(track_location, track_info)
+        if resolved_location is None:
+            d_print('Track already exists (duplicate edition)')
+            if m3u_playlist:
+                self._add_track_m3u_playlist(m3u_playlist, track_info, track_location)
+            if details_indent_adjustment != 0:
+                self.set_indent_number(indent_level)
+            symbols = self._get_status_symbols()
+            d_print(f'=== {symbols["skip"]} Track skipped ===', drop_level=header_drop_level)
+            self.track_skipped_count += 1
+            return return_with_blank_line("SKIPPED")
+        track_location = resolved_location
+
         # Ensure parent directory exists for custom single path formats that include subfolders.
         track_parent_dir = os.path.dirname(track_location)
         if track_parent_dir:
@@ -5039,6 +5134,18 @@ class Downloader:
         # Use actual container when module converts (e.g. Tidal Atmos AC4 -> FLAC)
         if getattr(download_info, 'different_codec', None):
             track_location = self._create_track_location(album_location, track_info, override_codec=download_info.different_codec, extra_kwargs=extra_kwargs)
+            resolved_location = self._resolve_track_filename_conflict(track_location, track_info)
+            if resolved_location is None:
+                d_print('Track already exists (duplicate edition)')
+                if m3u_playlist:
+                    self._add_track_m3u_playlist(m3u_playlist, track_info, track_location)
+                if details_indent_adjustment != 0:
+                    self.set_indent_number(indent_level)
+                symbols = self._get_status_symbols()
+                d_print(f'=== {symbols["skip"]} Track skipped ===', drop_level=header_drop_level)
+                self.track_skipped_count += 1
+                return return_with_blank_line("SKIPPED")
+            track_location = resolved_location
             if self._skip_existing_files_enabled() and os.path.exists(track_location):
                 d_print(f'Track file already exists')
                 # PR #4: skipped tracks must still appear in the M3U

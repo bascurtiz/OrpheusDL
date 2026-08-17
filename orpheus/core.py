@@ -50,6 +50,7 @@ class Orpheus:
                 "return_credited_albums": True,
                 "separate_tracks_skip_downloaded": True,
                 "prefer_highest_quality_edition": True,
+                "merge_same_name_albums": False,
                 "explicit_content": "prefer_explicit",
             },
             "formatting": {
@@ -64,6 +65,7 @@ class Orpheus:
                 "split_metadata": False,
                 "enable_zfill": True,
                 "force_album_format": False,
+                "use_album_artist_for_discography": False,
                 "use_playlist_position": False,
                 "use_album_position": False
             },
