@@ -1591,11 +1591,25 @@ class Downloader:
                         args.get('track_index', 0),
                         args.get('number_of_tracks', 0),
                     )
-                    
+
+                    # PR #4: M3U-only mode - record track in playlist file without downloading audio
+                    m3u_only = self.global_settings['playlist'].get('m3u_only', False)
+                    is_playlist_ctx = hasattr(self, 'download_mode') and self.download_mode is DownloadTypeEnum.playlist
+                    if m3u_only and is_playlist_ctx:
+                        track_location = self._create_track_location(args.get('album_location', ''), track_info, extra_kwargs=args.get('extra_kwargs', {}))
+                        m3u_path = args.get('m3u_playlist')
+                        if m3u_path:
+                            await loop.run_in_executor(None, self._add_track_m3u_playlist, m3u_path, track_info, track_location)
+                        return (index, track_name, "SKIPPED", None, None, 0, 0)
+
                     # Check if file already exists BEFORE getting download info (for temp file modules like Deezer)
                     if self._skip_existing_files_enabled() and track_info:
                         track_location = self._create_track_location(args.get('album_location', ''), track_info, extra_kwargs=args.get('extra_kwargs', {}))
                         if await loop.run_in_executor(None, os.path.isfile, track_location):
+                            # PR #4: skipped tracks must still appear in the M3U
+                            m3u_path = args.get('m3u_playlist')
+                            if m3u_path:
+                                await loop.run_in_executor(None, self._add_track_m3u_playlist, m3u_path, track_info, track_location)
                             return (index, track_name, "SKIPPED", None, None, 0, 0)
 
                     await self._apply_tidal_inter_track_pacing_async()
@@ -1948,7 +1962,12 @@ class Downloader:
             logging.warning(f"Could not retrieve playlist info for {playlist_id} from {self.service_name}. Skipping playlist.")
             return []
 
-        self.print(f'=== Downloading playlist {playlist_info.name} ({playlist_id}) ===', drop_level=1)
+        # PR #4: M3U-only mode generates the playlist file without downloading audio
+        m3u_only_mode = self.global_settings['playlist'].get('m3u_only', False)
+        if m3u_only_mode:
+            self.print(f'=== Generating M3U for playlist {playlist_info.name} ({playlist_id}) ===', drop_level=1)
+        else:
+            self.print(f'=== Downloading playlist {playlist_info.name} ({playlist_id}) ===', drop_level=1)
         self.print(f'Playlist creator: {playlist_info.creator}')
         if playlist_info.release_year: self.print(f'Playlist creation year: {playlist_info.release_year}')
         if playlist_info.duration: self.print(f'Duration: {beauty_format_seconds(playlist_info.duration)}')
@@ -1974,6 +1993,49 @@ class Downloader:
             self.print('⚠ Path too long, playlist folder name was truncated for filesystem safety.')
         playlist_path += '/'
         os.makedirs(playlist_path, exist_ok=True)
+
+        # PR #4: playlist sync - skip existing tracks and detect tracks removed from
+        # the playlist since the previous sync (optionally deleting orphaned files).
+        sync_mode = self.global_settings['playlist'].get('sync', False)
+        sync_remove_orphaned = self.global_settings['playlist'].get('sync_remove_orphaned', False)
+        sync_manifest_path = os.path.join(playlist_path, '.orpheus_sync.json')
+        old_manifest = {}
+        if sync_mode and os.path.isfile(sync_manifest_path):
+            try:
+                with open(sync_manifest_path, 'r', encoding='utf-8') as _f:
+                    old_manifest = json.load(_f).get('tracks', {})
+            except Exception:
+                old_manifest = {}
+
+        def _get_clean_track_id(track_id_or_info):
+            if isinstance(track_id_or_info, dict):
+                return str(track_id_or_info.get('id', ''))
+            if hasattr(track_id_or_info, 'id'):
+                return str(track_id_or_info.id)
+            return str(track_id_or_info)
+
+        if sync_mode:
+            current_id_set = {_get_clean_track_id(t) for t in playlist_info.tracks}
+            removed_ids = set(old_manifest.keys()) - current_id_set
+            if removed_ids:
+                print()
+                self.print(f'{len(removed_ids)} track(s) no longer in playlist:', drop_level=1)
+                for rid in removed_ids:
+                    rel_path = old_manifest.get(rid)
+                    if rel_path:
+                        full_path = os.path.join(playlist_path, rel_path)
+                        if sync_remove_orphaned:
+                            if os.path.isfile(full_path):
+                                os.remove(full_path)
+                                self.print(f'  Deleted: {rel_path}', drop_level=1)
+                            else:
+                                self.print(f'  Already gone: {rel_path}', drop_level=1)
+                        else:
+                            status = '(on disk)' if os.path.isfile(full_path) else '(not found on disk)'
+                            self.print(f'  {rel_path} {status}', drop_level=1)
+                    else:
+                        self.print(f'  Track {rid} removed (path unknown)', drop_level=1)
+        sync_new_entries = {}  # track_id -> relative_path, populated during download loop
 
         self._init_download_error_log(playlist_path, 'playlist', playlist_info.name, playlist_id)
         expected_playlist_tracks = playlist_info.num_tracks_from_api or playlist_info.num_tracks
@@ -2135,6 +2197,17 @@ class Downloader:
                             'extra_kwargs': playlist_info.track_extra_kwargs,
                             'original_index': original_index + 1
                         })
+
+                    # PR #4: record the track's on-disk location in the sync manifest
+                    if sync_mode and original_index < len(playlist_info.tracks):
+                        clean_id = _get_clean_track_id(playlist_info.tracks[original_index])
+                        is_skipped = (result is None and error is None)
+                        if isinstance(result, str) and os.path.isfile(result):
+                            sync_new_entries[clean_id] = os.path.relpath(result, playlist_path)
+                        elif is_skipped and clean_id in old_manifest:
+                            sync_new_entries[clean_id] = old_manifest[clean_id]
+                        elif is_skipped:
+                            sync_new_entries[clean_id] = None
             else:
                 # Fallback to sequential downloads
                 for index, track_id_or_info in enumerate(playlist_info.tracks, start=1):
@@ -2156,7 +2229,17 @@ class Downloader:
                         m3u_playlist=m3u_playlist_path,
                         extra_kwargs=playlist_info.track_extra_kwargs
                     )
-                    
+
+                    # PR #4: record the track's on-disk location in the sync manifest
+                    if sync_mode:
+                        clean_id = _get_clean_track_id(track_id_or_info)
+                        if isinstance(download_result, str) and download_result not in ("SKIPPED", "RATE_LIMITED") and os.path.isfile(download_result):
+                            sync_new_entries[clean_id] = os.path.relpath(download_result, playlist_path)
+                        elif download_result == "SKIPPED" and clean_id in old_manifest:
+                            sync_new_entries[clean_id] = old_manifest[clean_id]
+                        elif download_result == "SKIPPED":
+                            sync_new_entries[clean_id] = None  # file exists but path unknown (first sync)
+
                     # Add pause between downloads for Spotify/YouTube to prevent rate limiting
                     # Only pause if track was actually downloaded (not skipped) and not the last track
                     if self._handle_spotify_rate_limit_pause(download_result, index, number_of_tracks, service_name_override=service_name_lower):
@@ -2175,11 +2258,6 @@ class Downloader:
                             'extra_kwargs': playlist_info.track_extra_kwargs,
                             'original_index': index
                         })
-                    elif m3u_playlist_path: # Add to M3U only if download didn't fail/get deferred
-                        # Need to get track_info again or ensure download_track provides location
-                        # This part needs refinement - how to get track_location if download succeeds?
-                        # For now, assume download_track handles its own M3U addition upon success if needed.
-                        pass
 
         # --- Second Pass for Rate-Limited Tracks --- 
         if rate_limited_tracks:
@@ -2220,6 +2298,14 @@ class Downloader:
                 print()  # Add blank line before message
                 self.print("No tracks were deferred due to rate limiting.")
                 print()  # Add blank line after message
+
+        # PR #4: persist the sync manifest (track_id -> relative path)
+        if sync_mode:
+            try:
+                with open(sync_manifest_path, 'w', encoding='utf-8') as _f:
+                    json.dump({'tracks': sync_new_entries}, _f, indent=2, ensure_ascii=False)
+            except Exception as _e:
+                logging.warning(f'Could not save sync manifest: {_e}')
 
         # --- Final Summary ---
         self.set_indent_number(1)
@@ -4462,7 +4548,7 @@ class Downloader:
 
                 # Track info is None - might be OAuth race condition, retry after delay
                 if attempt < max_retries - 1:
-                    self.print(f'Track info not available, retrying in {retry_delay}s... (attempt {attempt + 1}/{max_retries})')
+                    self.print(f'[Retry {attempt + 1}/{max_retries}] Track info unavailable for {display_track_id}, retrying in {retry_delay}s...')
                     time.sleep(retry_delay)
 
             except Exception as e:
@@ -4498,7 +4584,8 @@ class Downloader:
 
                 # For other exceptions, retry if we have attempts left
                 if attempt < max_retries - 1:
-                    self.print(f'Error getting track info, retrying in {retry_delay}s... (attempt {attempt + 1}/{max_retries})')
+                    err_short = type(last_exception).__name__
+                    self.print(f'[Retry {attempt + 1}/{max_retries}] Error for {display_track_id} ({err_short}), retrying in {retry_delay}s...')
                     time.sleep(retry_delay)
                 else:
                     service_key = self._service_key()
@@ -4521,6 +4608,8 @@ class Downloader:
                     return return_with_blank_line(None)
 
         # Check if track_info is still None after all retries
+        if track_info is not None and attempt > 0:
+            self.print(f'[Retry succeeded] Got track info for {display_track_id} on attempt {attempt + 1}/{max_retries}')
         if track_info is None:
             self.print(f'Track info is None for {display_track_id}. Track may be unavailable or not found.')
             symbols = self._get_status_symbols()
@@ -4656,9 +4745,24 @@ class Downloader:
             self._download_album_files(single_album_path, album_info_for_single)
 
 
+        # PR #4: M3U-only mode - generate playlist file without downloading audio
+        m3u_only = self.global_settings['playlist'].get('m3u_only', False)
+        is_playlist_ctx = hasattr(self, 'download_mode') and self.download_mode is DownloadTypeEnum.playlist
+        if m3u_only and is_playlist_ctx:
+            if m3u_playlist:
+                self._add_track_m3u_playlist(m3u_playlist, track_info, track_location)
+            if details_indent_adjustment != 0:
+                self.set_indent_number(indent_level)
+            symbols = self._get_status_symbols()
+            d_print(f'=== {symbols["skip"]} M3U only ===', drop_level=header_drop_level)
+            return return_with_blank_line("SKIPPED")
+
         if self._skip_existing_files_enabled() and os.path.exists(track_location):
             d_print(f'Track file already exists')
-            
+            # PR #4: skipped tracks must still appear in the M3U
+            if m3u_playlist:
+                self._add_track_m3u_playlist(m3u_playlist, track_info, track_location)
+
             # Restore original indent level if it was adjusted before printing completion message
             if details_indent_adjustment != 0:
                 self.set_indent_number(indent_level)
@@ -4858,6 +4962,9 @@ class Downloader:
             track_location = self._create_track_location(album_location, track_info, override_codec=download_info.different_codec, extra_kwargs=extra_kwargs)
             if self._skip_existing_files_enabled() and os.path.exists(track_location):
                 d_print(f'Track file already exists')
+                # PR #4: skipped tracks must still appear in the M3U
+                if m3u_playlist:
+                    self._add_track_m3u_playlist(m3u_playlist, track_info, track_location)
                 if details_indent_adjustment != 0:
                     self.set_indent_number(indent_level)
                 symbols = self._get_status_symbols()
