@@ -369,6 +369,15 @@ async def download_file_async(session, url, file_location, headers={}, enable_pr
                 print(f'\tDeleting partially downloaded file "{str(file_location)}"')
                 silentremove(file_location)
             raise KeyboardInterrupt
+        except Exception:
+            # Clean up the partial file on any other failure so skip-if-exists
+            # logic can never treat a broken download as a complete file (issue #96).
+            if os.path.isfile(file_location):
+                try:
+                    os.remove(file_location)
+                except OSError:
+                    pass
+            raise
 
 def download_file(url, file_location, headers={}, enable_progress_bar=False, indent_level=0, artwork_settings=None, skip_if_exists=True):
     """Synchronous wrapper for the async download function for backward compatibility"""
@@ -381,6 +390,7 @@ def download_file(url, file_location, headers={}, enable_progress_bar=False, ind
         os.makedirs(directory, exist_ok=True)
 
     r = r_session.get(url, stream=True, headers=headers, verify=False)
+    r.raise_for_status()
 
     total = None
     if 'content-length' in r.headers:
@@ -446,6 +456,12 @@ def download_file(url, file_location, headers={}, enable_progress_bar=False, ind
             print(f'\tDeleting partially downloaded file "{str(file_location)}"')
             silentremove(file_location)
         raise KeyboardInterrupt
+    except Exception:
+        # Clean up the partial file on any failure so skip-if-exists logic can
+        # never treat a broken download as a complete file (issue #96).
+        if os.path.isfile(file_location):
+            silentremove(file_location)
+        raise
     
     # Return the file location on successful download
     return file_location

@@ -129,6 +129,7 @@ class Orpheus:
                 "disable_subscription_checks": False,
                 "enable_undesirable_conversions": False,
                 "ignore_existing_files": False,
+                "reverify_existing_files": False,
                 "ignore_different_artists": True
             }
         }

@@ -348,6 +348,12 @@ class Downloader:
         """When True, skip tracks whose target file already exists."""
         return bool(self.global_settings.get('advanced', {}).get('ignore_existing_files', False))
 
+    def _reverify_existing_files_enabled(self) -> bool:
+        """When True (and skip-if-exists is on), an existing file is only skipped
+        if its duration matches the track's expected duration; mismatched (stale)
+        files are removed and re-downloaded so their tags are refreshed."""
+        return bool(self.global_settings.get('advanced', {}).get('reverify_existing_files', False))
+
     def _merge_same_name_albums_enabled(self) -> bool:
         """When True, same-name editions of an album merge into one folder during
         discography downloads (track conflicts are resolved by duration)."""
@@ -383,6 +389,15 @@ class Downloader:
         except OSError:
             pass
 
+    def _force_remove_track_file(self, track_location: str) -> None:
+        """Remove a stale/partial/untagged file so a retried track is always
+        downloaded and tagged from scratch (issue #96). Ignores skip-if-exists."""
+        try:
+            if track_location and os.path.isfile(track_location):
+                os.remove(track_location)
+        except OSError:
+            pass
+
     def _get_audio_duration_seconds(self, file_path: str):
         """Duration (seconds) of an existing audio file, or None if unreadable."""
         if not file_path or not os.path.isfile(file_path):
@@ -397,6 +412,30 @@ class Downloader:
         except Exception:
             pass
         return None
+
+    def _existing_file_is_stale(self, track_location: str, track_info) -> bool:
+        """With reverify-by-duration enabled, an existing file is stale when its
+        audio duration doesn't match the track's expected duration (e.g. an
+        untagged or wrong-version leftover from an older build).
+
+        Stale files are removed so the track is downloaded and tagged fresh.
+        Files with a matching duration (or whose duration can't be compared)
+        keep the normal skip-if-exists behavior."""
+        if not self._reverify_existing_files_enabled():
+            return False
+        if not track_info:
+            return False
+        expected = getattr(track_info, 'duration', None)
+        if not expected:
+            return False
+        actual = self._get_audio_duration_seconds(track_location)
+        if actual is None:
+            return False  # unreadable / not audio -> don't guess, keep skip behavior
+        try:
+            # 2s tolerance: allows small container/codec padding differences
+            return abs(float(actual) - float(expected)) > 2.0
+        except (TypeError, ValueError):
+            return False
 
     def _resolve_track_filename_conflict(self, track_location: str, track_info):
         """
@@ -2387,7 +2426,8 @@ class Downloader:
                     number_of_tracks=number_of_tracks,
                     indent_level=1,
                     m3u_playlist=m3u_playlist_path, # Pass M3U path again
-                    extra_kwargs=retry_item['extra_kwargs']
+                    extra_kwargs=retry_item['extra_kwargs'],
+                    force_redownload=True
                 )
                 # Add pause between retry tracks (except for the last one)
                 if i < len(rate_limited_tracks) - 1:
@@ -3688,7 +3728,8 @@ class Downloader:
                             main_artist=artist_name,
                             cover_temp_location=cover_temp_location,
                             indent_level=track_content_indent,
-                            extra_kwargs=retry_item['extra_kwargs']
+                            extra_kwargs=retry_item['extra_kwargs'],
+                            force_redownload=True
                         )
                         # Add pause between retry tracks (except for the last one)
                         if i < len(rate_limited_tracks) - 1:
@@ -3787,7 +3828,8 @@ class Downloader:
                             main_artist=artist_name,
                             cover_temp_location=cover_temp_location,
                             indent_level=track_content_indent,
-                            extra_kwargs=retry_item['extra_kwargs']
+                            extra_kwargs=retry_item['extra_kwargs'],
+                            force_redownload=True
                         )
                         # Add pause between retry tracks (except for the last one)
                         if i < len(rate_limited_tracks) - 1:
@@ -4097,7 +4139,8 @@ class Downloader:
                             main_artist=artist_name,
                             number_of_tracks=1,
                             indent_level=1,
-                            extra_kwargs=retry_item['extra_kwargs']
+                            extra_kwargs=retry_item['extra_kwargs'],
+                            force_redownload=True
                         )
                         # Add 30-second pause between retry tracks (except for the last one)
                         if i < len(rate_limited_tracks) - 1:
@@ -4153,7 +4196,8 @@ class Downloader:
                             main_artist=artist_name,
                             number_of_tracks=1,
                             indent_level=1,
-                            extra_kwargs=retry_item['extra_kwargs']
+                            extra_kwargs=retry_item['extra_kwargs'],
+                            force_redownload=True
                         )
                         # Add 30-second pause between retry tracks (except for the last one)
                         if i < len(rate_limited_tracks) - 1:
@@ -4264,7 +4308,7 @@ class Downloader:
         print()
         print()
 
-    async def _download_track_async(self, session, track_id=None, track_info=None, download_info=None, album_location='', main_artist='', track_index=0, number_of_tracks=0, cover_temp_location='', indent_level=1, m3u_playlist=None, extra_kwargs={}, verbose=True):
+    async def _download_track_async(self, session, track_id=None, track_info=None, download_info=None, album_location='', main_artist='', track_index=0, number_of_tracks=0, cover_temp_location='', indent_level=1, m3u_playlist=None, extra_kwargs={}, verbose=True, force_redownload=False):
         """Async version of download_track for use with concurrent downloads - OPTIMIZED VERSION"""
         import os
         import shutil
@@ -4322,7 +4366,12 @@ class Downloader:
                 if self._skip_existing_files_enabled() and track_info:
                     track_location = self._create_track_location(album_location, track_info, extra_kwargs=extra_kwargs)
                     if await loop.run_in_executor(None, os.path.isfile, track_location):
-                        return "ALREADY_EXISTS"
+                        # Re-verify by duration: remove stale/untagged leftovers so they
+                        # are downloaded and tagged fresh instead of skipped forever.
+                        if await loop.run_in_executor(None, self._existing_file_is_stale, track_location, track_info):
+                            await loop.run_in_executor(None, self._force_remove_track_file, track_location)
+                        else:
+                            return "ALREADY_EXISTS"
                 
                 # Then get download info using the track_info
                 download_info = await loop.run_in_executor(None, get_download_info_fallback, track_info)
@@ -4350,6 +4399,10 @@ class Downloader:
             override_codec=getattr(download_info, 'different_codec', None),
             extra_kwargs=extra_kwargs
         )
+        # Retried tracks (issue #96): remove any stale/partial/untagged file from the
+        # previous failed attempt so the retry always downloads and tags from scratch.
+        if force_redownload:
+            await loop.run_in_executor(None, self._force_remove_track_file, track_location)
         # Merge-mode dedup: skip duplicate same-duration tracks, rename different-duration ones.
         resolved_location = self._resolve_track_filename_conflict(track_location, track_info)
         if resolved_location is None:
@@ -4362,7 +4415,12 @@ class Downloader:
 
         # Check if file already exists - use thread pool for file checks
         if self._skip_existing_files_enabled() and await loop.run_in_executor(None, os.path.isfile, track_location):
-            return "ALREADY_EXISTS"
+            # Re-verify by duration: remove stale/untagged leftovers so they get
+            # downloaded and tagged fresh instead of being skipped forever.
+            if await loop.run_in_executor(None, self._existing_file_is_stale, track_location, track_info):
+                await loop.run_in_executor(None, self._force_remove_track_file, track_location)
+            else:
+                return "ALREADY_EXISTS"
 
         if not self._skip_existing_files_enabled():
             await loop.run_in_executor(None, self._prepare_track_download_path, track_location)
@@ -4562,7 +4620,7 @@ class Downloader:
             
             return None  # Return None to indicate failure
 
-    def download_track(self, track_id, album_location='', main_artist='', track_index=0, number_of_tracks=0, cover_temp_location='', indent_level=1, m3u_playlist=None, extra_kwargs={}, verbose=True, album_info_for_single=None):
+    def download_track(self, track_id, album_location='', main_artist='', track_index=0, number_of_tracks=0, cover_temp_location='', indent_level=1, m3u_playlist=None, extra_kwargs={}, verbose=True, album_info_for_single=None, force_redownload=False):
         self.set_indent_number(indent_level)
         # Aliasing for convenience.
         d_print = self.oprinter.oprint
@@ -4890,6 +4948,11 @@ class Downloader:
             album_location = self._platform_base_path()
         track_location = self._create_track_location(album_location, track_info, extra_kwargs=extra_kwargs)
 
+        # Retried tracks (issue #96): remove any stale/partial/untagged file from the
+        # previous failed attempt so the retry always downloads and tags from scratch.
+        if force_redownload:
+            self._force_remove_track_file(track_location)
+
         # Merge-mode dedup: when merging same-name editions, skip tracks that already
         # exist with the same duration and rename same-name/different-duration tracks.
         resolved_location = self._resolve_track_filename_conflict(track_location, track_info)
@@ -4932,20 +4995,26 @@ class Downloader:
             return return_with_blank_line("SKIPPED")
 
         if self._skip_existing_files_enabled() and os.path.exists(track_location):
-            d_print(f'Track file already exists')
-            # PR #4: skipped tracks must still appear in the M3U
-            if m3u_playlist:
-                self._add_track_m3u_playlist(m3u_playlist, track_info, track_location)
+            if self._existing_file_is_stale(track_location, track_info):
+                # Re-verify by duration: a stale/untagged leftover (e.g. from an older
+                # version) is removed and re-downloaded below so its tags are refreshed.
+                d_print('Existing file duration mismatch - re-downloading to refresh tags')
+                self._force_remove_track_file(track_location)
+            else:
+                d_print(f'Track file already exists')
+                # PR #4: skipped tracks must still appear in the M3U
+                if m3u_playlist:
+                    self._add_track_m3u_playlist(m3u_playlist, track_info, track_location)
 
-            # Restore original indent level if it was adjusted before printing completion message
-            if details_indent_adjustment != 0:
-                self.set_indent_number(indent_level)
-            
-            symbols = self._get_status_symbols()
-            d_print(f'=== {symbols["skip"]} Track skipped ===', drop_level=header_drop_level)
-            self.track_skipped_count += 1
+                # Restore original indent level if it was adjusted before printing completion message
+                if details_indent_adjustment != 0:
+                    self.set_indent_number(indent_level)
+                
+                symbols = self._get_status_symbols()
+                d_print(f'=== {symbols["skip"]} Track skipped ===', drop_level=header_drop_level)
+                self.track_skipped_count += 1
 
-            return return_with_blank_line("SKIPPED")
+                return return_with_blank_line("SKIPPED")
 
         # Audio is downloaded below - lyrics now handled after tagging to ensure they are fetched
 
@@ -5134,6 +5203,8 @@ class Downloader:
         # Use actual container when module converts (e.g. Tidal Atmos AC4 -> FLAC)
         if getattr(download_info, 'different_codec', None):
             track_location = self._create_track_location(album_location, track_info, override_codec=download_info.different_codec, extra_kwargs=extra_kwargs)
+            if force_redownload:
+                self._force_remove_track_file(track_location)
             resolved_location = self._resolve_track_filename_conflict(track_location, track_info)
             if resolved_location is None:
                 d_print('Track already exists (duplicate edition)')
@@ -5147,16 +5218,20 @@ class Downloader:
                 return return_with_blank_line("SKIPPED")
             track_location = resolved_location
             if self._skip_existing_files_enabled() and os.path.exists(track_location):
-                d_print(f'Track file already exists')
-                # PR #4: skipped tracks must still appear in the M3U
-                if m3u_playlist:
-                    self._add_track_m3u_playlist(m3u_playlist, track_info, track_location)
-                if details_indent_adjustment != 0:
-                    self.set_indent_number(indent_level)
-                symbols = self._get_status_symbols()
-                d_print(f'=== {symbols["skip"]} Track skipped ===', drop_level=header_drop_level)
-                self.track_skipped_count += 1
-                return return_with_blank_line("SKIPPED")
+                if self._existing_file_is_stale(track_location, track_info):
+                    d_print('Existing file duration mismatch - re-downloading to refresh tags')
+                    self._force_remove_track_file(track_location)
+                else:
+                    d_print(f'Track file already exists')
+                    # PR #4: skipped tracks must still appear in the M3U
+                    if m3u_playlist:
+                        self._add_track_m3u_playlist(m3u_playlist, track_info, track_location)
+                    if details_indent_adjustment != 0:
+                        self.set_indent_number(indent_level)
+                    symbols = self._get_status_symbols()
+                    d_print(f'=== {symbols["skip"]} Track skipped ===', drop_level=header_drop_level)
+                    self.track_skipped_count += 1
+                    return return_with_blank_line("SKIPPED")
 
         self._prepare_track_download_path(track_location)
 
@@ -5225,8 +5300,11 @@ class Downloader:
         
         if track_info.cover_url and needs_artwork:
             d_print('Downloading artwork...')
-            artwork_path = self.create_temp_filename()
-            download_file(track_info.cover_url, artwork_path, artwork_settings=self._get_artwork_settings(), indent_level=self.indent_number)
+            try:
+                artwork_path = self.create_temp_filename()
+                download_file(track_info.cover_url, artwork_path, artwork_settings=self._get_artwork_settings(), indent_level=self.indent_number)
+            except Exception:
+                artwork_path = ''  # Continue without artwork if download fails
 
         # Do conversion BEFORE tagging (like old version)
         conversion_result = self._convert_file_if_needed(final_location, track_info, d_print)
