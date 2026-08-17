@@ -636,4 +636,7 @@ def orpheus_core_download(orpheus_session: Orpheus, media_to_download, third_par
                 downloader.print('No tracks were deferred due to rate limiting.', drop_level=0)
                 print()  # Add blank line after message
 
+    # PR #2: end-of-run download summary (counts + errors)
+    downloader.print_download_summary()
+
     if os.path.exists('temp'): shutil.rmtree('temp')

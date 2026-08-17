@@ -16,6 +16,7 @@ from mutagen.mp4 import MP4Tags
 from mutagen.oggopus import OggOpus
 from mutagen.oggvorbis import OggVorbis
 from mutagen.oggvorbis import OggVorbisHeaderError
+from datetime import date
 import mutagen
 
 from utils.exceptions import *
@@ -24,6 +25,8 @@ from utils.utils import format_album_artist_tag, get_primary_artist, zfill_numbe
 
 # Needed for Windows tagging support
 MP4Tags._padding = 0
+
+today = date.today()
 
 
 def _resize_image_if_needed(image_path: str, max_size_bytes: int = 16 * 1024 * 1024, target_resolution: tuple = (3000, 3000)) -> str:
@@ -106,7 +109,7 @@ def _ogg_tags_appear_written(file_path: str) -> bool:
         return False
 
 
-def tag_file(file_path: str, image_path: str, track_info: TrackInfo, credits_list: list, embedded_lyrics: str, container: ContainerEnum, metadata_separator: str = ';', split_metadata: bool = True, enable_zfill: bool = False, _repair_retry: bool = False):
+def tag_file(file_path: str, image_path: str, track_info: TrackInfo, credits_list: list, embedded_lyrics: str, container: ContainerEnum, metadata_separator: str = ';', split_metadata: bool = True, enable_zfill: bool = False, _repair_retry: bool = False, service_name: str = ''):
     if container == ContainerEnum.flac:
         tagger = FLAC(file_path)
     elif container == ContainerEnum.opus:
@@ -127,6 +130,7 @@ def tag_file(file_path: str, image_path: str, track_info: TrackInfo, credits_lis
         tagger.tags.RegisterTXXXKey('recordlabel', 'RECORDLABEL')
         tagger.tags.RegisterTXXXKey('upc', 'BARCODE')
         tagger.tags.RegisterTXXXKey('barcode', 'BARCODE')
+        tagger.tags.RegisterTXXXKey('source', 'SOURCE')
         tagger.tags.RegisterTXXXKey('genre_txxx', 'GENRE')
         tagger.tags.RegisterTXXXKey('compatible_brands', 'compatible_brands')
         tagger.tags.RegisterTXXXKey('major_brand', 'major_brand')
@@ -319,6 +323,28 @@ def tag_file(file_path: str, image_path: str, track_info: TrackInfo, credits_lis
     # add the description tag
     if track_info.tags.description and (container == ContainerEnum.m4a or container == ContainerEnum.mp4):
         tagger['desc'] = [track_info.tags.description]
+
+    # add OrpheusDL provenance comment/source tags (PR #2) - real track comments
+    # below take precedence, so they are never overwritten
+    if service_name:
+        provenance_comment = f'{service_name} OrpheusDL {today.strftime("%m/%d/%y")}'
+        if container == ContainerEnum.m4a or container == ContainerEnum.mp4:
+            if not track_info.tags.comment:
+                tagger['\xa9cmt'] = [provenance_comment]
+            tagger['----:com.apple.itunes:SOURCE'] = [service_name.encode()]
+        elif container == ContainerEnum.mp3:
+            if not track_info.tags.comment:
+                tagger.tags._EasyID3__id3._DictProxy__dict['COMM'] = COMM(
+                    encoding=3,
+                    lang=u'eng',
+                    desc=u'',
+                    text=provenance_comment
+                )
+            tagger['source'] = service_name
+        else:
+            if not track_info.tags.comment:
+                tagger['comment'] = provenance_comment
+            tagger['source'] = service_name
 
     # add comment tag
     if track_info.tags.comment:

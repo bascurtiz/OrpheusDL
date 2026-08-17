@@ -33,6 +33,7 @@ from utils.exceptions import *
 from utils.download_errors import (
     catalog_summary_url,
     merge_album_exclusions,
+    platform_album_url,
     platform_track_url,
 )
 
@@ -324,6 +325,18 @@ class Downloader:
 
         self.print = self.oprinter.oprint
         self.set_indent_number = self.oprinter.set_indent_number
+
+        # PR #2: end-of-run download summary counters
+        self.track_download_count = 0
+        self.track_skipped_count = 0
+
+        self.track_not_streamable_count = 0
+        self.tracks_not_streamable = []
+
+        self.track_download_failed_count = 0
+        self.albums_with_failed_tracks = []
+
+        self.total_download_time: float = 0
 
         self._download_error_log_path = None
         self._download_error_log_context = None
@@ -1454,12 +1467,14 @@ class Downloader:
             self._active_tidal_gate = tidal_gate
             self._active_tidal_cfg = tidal_cfg
             try:
+                fallback_start_time = time.time()
                 for i, (track_info, args) in enumerate(zip(track_list, download_args_list)):
                     try:
                         result = self.download_track(**args)
                         results.append((i, result, None))
                     except Exception as e:
                         results.append((i, None, e))
+                self.total_download_time = time.time() - fallback_start_time
             finally:
                 self._active_tidal_gate = None
                 self._active_tidal_cfg = None
@@ -1802,6 +1817,7 @@ class Downloader:
         
         # Performance summary
         total_time = time.time() - start_time
+        self.total_download_time = total_time
         if total_time > 0:
             avg_concurrent = len(download_times) / total_time if download_times else 0
             total_mb = total_bytes_downloaded / (1024 * 1024)
@@ -1834,6 +1850,12 @@ class Downloader:
         actual_downloaded = sum(1 for r in results if r and r[2] is None and r[1] is not None)  # Newly downloaded
         actual_already_existed = sum(1 for r in results if r and r[2] is None and r[1] is None)  # Already existed
         actual_failed = sum(1 for r in results if r and r[2] is not None)  # Failed with error
+
+        # PR #2: accumulate batch-level counters (concurrent mode only; the per-track
+        # success/skip/error counters in download_track cover sequential mode)
+        self.track_download_count += actual_downloaded
+        self.track_skipped_count += actual_already_existed
+        self.track_download_failed_count += actual_failed
         
         # Show final summary only when there are failures
         if actual_failed > 0:
@@ -2499,6 +2521,98 @@ class Downloader:
             self._discography_album_info_cache[album_id_str] = album_info
         return album_info
 
+    def _discography_album_release_year(self, album_id) -> int:
+        """Release year of a discography album from the pre-scan cache (0 when unknown)."""
+        info = self._discography_album_info_cache.get(str(album_id))
+        return int(getattr(info, 'release_year', 0) or 0)
+
+    def _track_isrc_fallback(self, track_id, extra_kwargs=None):
+        """Guarded service track-info request used when ISRC is not embedded in cached data."""
+        try:
+            quality_tier = QualityEnum[self.global_settings['general']['download_quality'].upper()]
+            codec_options = CodecOptions(
+                spatial_codecs=self.global_settings['codecs']['spatial_codecs'],
+                proprietary_codecs=self.global_settings['codecs']['proprietary_codecs'],
+            )
+            track_info_kwargs = self._filter_kwargs_for_method(self.service.get_track_info, extra_kwargs or {})
+            info = self.service.get_track_info(track_id, quality_tier, codec_options, **track_info_kwargs)
+            if info and getattr(info, 'tags', None):
+                return info.tags.isrc
+        except Exception:
+            pass
+        return None
+
+    def _track_isrc_from_album(self, album_info, track_id):
+        """Best-effort ISRC lookup for a track of an already-fetched album.
+
+        Reads ISRC from embedded raw track data when the module provides it
+        (e.g. Qobuz/Beatport expose it through track_extra_kwargs['data']);
+        falls back to a guarded service track-info request.
+        """
+        raw = getattr(album_info, 'track_extra_kwargs', None) or {}
+        if isinstance(raw, dict):
+            data_map = raw.get('data') if isinstance(raw.get('data'), dict) else raw
+            key = str(track_id) if not isinstance(track_id, str) else track_id
+            entry = data_map.get(key)
+            if isinstance(entry, dict) and entry.get('isrc'):
+                return entry['isrc']
+        if hasattr(track_id, 'tags') and getattr(track_id, 'tags', None):
+            isrc = getattr(track_id.tags, 'isrc', None)
+            if isrc:
+                return isrc
+        return self._track_isrc_fallback(track_id, getattr(album_info, 'track_extra_kwargs', None))
+
+    def _track_isrc(self, track_id, extra_kwargs=None):
+        """Best-effort ISRC lookup for a standalone track, with a guarded service fallback."""
+        if hasattr(track_id, 'tags') and getattr(track_id, 'tags', None):
+            isrc = getattr(track_id.tags, 'isrc', None)
+            if isrc:
+                return isrc
+        if isinstance(extra_kwargs, dict):
+            data_map = extra_kwargs.get('data') if isinstance(extra_kwargs.get('data'), dict) else extra_kwargs
+            key = str(track_id) if not isinstance(track_id, str) else track_id
+            entry = data_map.get(key)
+            if isinstance(entry, dict) and entry.get('isrc'):
+                return entry['isrc']
+        return self._track_isrc_fallback(track_id, extra_kwargs)
+
+    def _service_display_name(self) -> str:
+        """Human-readable service name for provenance tags (e.g. 'Qobuz', 'Spotify')."""
+        try:
+            return self.module_settings[self.service_name].service_name
+        except Exception:
+            return self.service_name or ''
+
+    def print_download_summary(self):
+        """PR #2: print an end-of-run summary of counts and failed albums."""
+        minutes = int(self.total_download_time // 60)
+        seconds = self.total_download_time % 60
+        if self.total_download_time > 0:
+            time_str = f"{minutes}m {seconds:.1f}s"
+        else:
+            time_str = f"{seconds:.1f}s"
+        print()
+        print("=== TOTAL COUNTS ===")
+        print(f"=== Download time: {time_str}")
+        print(f'=== {self.track_download_count} tracks downloaded ===')
+        print(f'=== {self.track_skipped_count} tracks skipped ===')
+        print()
+
+        if (self.track_not_streamable_count > 0) or (self.track_download_failed_count > 0) or (len(self.albums_with_failed_tracks) > 0):
+            albums_set = set(self.albums_with_failed_tracks)
+            print("=== ERRORS ===")
+            if self.track_not_streamable_count > 0:
+                print(f'=== {self.track_not_streamable_count} tracks not streamable ===')
+            if (self.track_download_failed_count > 0) or albums_set:
+                print(f'=== {self.track_download_failed_count} tracks failed on {len(albums_set)} albums ===')
+                for album in albums_set:
+                    album_url = platform_album_url(getattr(self, 'service_name', None), album)
+                    print(f'   {album_url if album_url else album}')
+            print()
+        else:
+            print("=== NO ERRORS ===")
+            print()
+
     def _select_discography_albums(self, album_items, extra_kwargs=None) -> list:
         """
         Pre-scan artist/label albums: filter Atmos/explicit, optionally pick highest-quality
@@ -3148,11 +3262,24 @@ class Downloader:
                 self.print(f'Could not get album info for {album_id}: {simplify_error_message(normalized_msg)}', drop_level=1)
                 symbols = self._get_status_symbols()
                 self.print(f'=== {symbols["error"]} Album failed ===', drop_level=1)
+                # PR #2: remember the album so the final summary can link to it
+                self.albums_with_failed_tracks.append(str(album_id))
             return []
 
         if not album_info:
             logging.warning(f"Could not retrieve album info for {album_id} from {self.service_name}. Skipping album.")
             return []
+
+        # PR #2: optional album-artist filter (artist downloads pass the artist name so
+        # albums where the artist is only a performer/credited guest are skipped)
+        album_artist_to_filter = (extra_kwargs or {}).pop('album_artist_to_filter', None)
+        if album_artist_to_filter:
+            album_artists = album_info.album_artist
+            if not isinstance(album_artists, list):
+                album_artists = [album_artists] if album_artists else []
+            if album_artists and album_artist_to_filter.lower() not in [a.lower() for a in album_artists if a]:
+                self.print(f'Album {album_info.id} does not have {album_artist_to_filter} as an album artist', drop_level=1)
+                return []
 
         number_of_tracks = len(album_info.tracks)
         self._current_disc_track_totals = self._compute_disc_track_totals(album_info.tracks)
@@ -3261,6 +3388,11 @@ class Downloader:
                 
                 # Download tracks concurrently (with optional batch throttle)
                 results = self._download_tracks_possibly_throttled(album_info.tracks, download_args_list, concurrent_downloads, performance_summary_indent=0)
+                
+                # PR #2: record the album whenever any of its tracks failed
+                for _orig_index, _track_result, _track_error in results:
+                    if isinstance(_track_error, Exception):
+                        self.albums_with_failed_tracks.append(album_info.id or str(album_id))
                 
                 # Process results and collect rate-limited tracks
                 # (Errors are already reported by concurrent download progress monitor)
@@ -3586,24 +3718,66 @@ class Downloader:
         if number_of_albums != len(artist_info.albums or []):
             self.print(f'Albums after edition filter: {number_of_albums!s}')
 
+        # PR #2: order the discography newest-first so duplicate singles/editions
+        # resolve to the most recent release when filtering by ISRC below.
+        selected_album_ids = sorted(
+            selected_album_ids,
+            key=lambda album_id: self._discography_album_release_year(album_id),
+            reverse=True,
+        )
+
+        isrc_list = []  # ISRCs already seen across album tracks
+        skip_album_is_single_that_exists = False
         for index, album_id_to_process in enumerate(selected_album_ids, start=1):
             # Ensure consistent indentation for Album headers (8 spaces)
             self.set_indent_number(1)
             self.print(f'Album {index}/{number_of_albums}')
 
-            tracks_downloaded += self.download_album(
-                album_id_to_process, # This is now guaranteed to be a string ID
-                artist_name=artist_name,
-                path=artist_path,
-                indent_level=2,
-                extra_kwargs=artist_info.album_extra_kwargs, # General extra_kwargs from artist level
-                artist_album_index=index,
-                artist_album_count=number_of_albums,
-            )
+            # Pre-scan this album's tracks for ISRC-based duplicate filtering:
+            # a single-track album whose ISRC was already seen is skipped (the
+            # same song is already covered by an album downloaded earlier).
+            album_info = self._discography_album_info_cache.get(str(album_id_to_process))
+            album_tracks = getattr(album_info, 'tracks', None) or [] if album_info else []
+            album_has_single_track = len(album_tracks) == 1
+            for track in album_tracks:
+                isrc = self._track_isrc_from_album(album_info, track) if album_info else None
+                if not isrc:
+                    continue
+                if album_has_single_track and isrc in isrc_list:
+                    skip_album_is_single_that_exists = True
+                else:
+                    isrc_list.append(isrc)
+
+            artist_info.album_extra_kwargs.update({'album_artist_to_filter': artist_info.name})
+            if not skip_album_is_single_that_exists:
+                tracks_downloaded += self.download_album(
+                    album_id_to_process, # This is now guaranteed to be a string ID
+                    artist_name=artist_name,
+                    path=artist_path,
+                    indent_level=2,
+                    extra_kwargs=artist_info.album_extra_kwargs, # General extra_kwargs from artist level
+                    artist_album_index=index,
+                    artist_album_count=number_of_albums,
+                )
+            else:
+                self.print(f"Skipping single-track album {album_id_to_process} as its track already exists in the artist's downloads.", drop_level=2)
+                skip_album_is_single_that_exists = False  # Reset for next album
 
         self.set_indent_number(2)
         skip_tracks = self.global_settings['artist_downloading']['separate_tracks_skip_downloaded']
-        tracks_to_download = [i for i in artist_info.tracks if (i not in tracks_downloaded and skip_tracks) or not skip_tracks]
+
+        # PR #2: skip separate artist tracks whose ISRC already appears in a
+        # downloaded album (catches the same song under different IDs, which the
+        # old track-ID membership check could not). The ID check is kept as a
+        # fallback for when an ISRC is unavailable.
+        tracks_to_download = []
+        for artist_track in artist_info.tracks:
+            track_isrc = self._track_isrc(artist_track, artist_info.track_extra_kwargs)
+            is_duplicate = (artist_track in tracks_downloaded) or (bool(track_isrc) and track_isrc in isrc_list)
+            if (not is_duplicate and skip_tracks) or not skip_tracks:
+                tracks_to_download.append(artist_track)
+            else:
+                self.print(f"Track {artist_track} will NOT be downloaded, it already exists in downloaded albums (ISRC: {track_isrc}).", drop_level=2)
         
         # Apple Music returns "top songs" on artist endpoints, which can duplicate
         # tracks already covered by album downloads. Keep artist mode album-only.
@@ -4087,7 +4261,7 @@ class Downloader:
                 meta_sep = self.global_settings['formatting'].get('metadata_separator', ';')
                 split_meta = self.global_settings['formatting'].get('split_metadata', True)
                 enable_zfill = self.global_settings['formatting'].get('enable_zfill', False)
-                tag_file(final_location, embed_artwork_path, track_info, credits_list, embedded_lyrics, container, metadata_separator=meta_sep, split_metadata=split_meta, enable_zfill=enable_zfill)
+                tag_file(final_location, embed_artwork_path, track_info, credits_list, embedded_lyrics, container, metadata_separator=meta_sep, split_metadata=split_meta, enable_zfill=enable_zfill, service_name=self._service_display_name())
             else:
                 pass  # Skip tagging for unsupported containers like WAV
 
@@ -4112,7 +4286,7 @@ class Downloader:
                     embed_artwork_path = artwork_path if self.global_settings['covers']['embed_cover'] else None
                     meta_sep = self.global_settings['formatting'].get('metadata_separator', ';')
                     split_meta = self.global_settings['formatting'].get('split_metadata', True)
-                    tag_file(old_track_location, embed_artwork_path, track_info, credits_list, embedded_lyrics, old_container, metadata_separator=meta_sep, split_metadata=split_meta, enable_zfill=enable_zfill)
+                    tag_file(old_track_location, embed_artwork_path, track_info, credits_list, embedded_lyrics, old_container, metadata_separator=meta_sep, split_metadata=split_meta, enable_zfill=enable_zfill, service_name=self._service_display_name())
                 else:
                     pass  # Skip tagging for unsupported containers
             
@@ -4271,6 +4445,16 @@ class Downloader:
                 track_info = self.service.get_track_info(track_id, quality_tier, codec_options, **track_info_kwargs)
                 track_info = self._ensure_track_info_id(track_info, track_id)
                 self._apply_album_context_to_track(track_info, safe_extra_kwargs)
+
+                # PR #2: count failed tracks (not-streamable vs other failures).
+                # Printing/failing is handled by the existing error checks below.
+                if track_info.error:
+                    if "is not streamable" in track_info.error:
+                        self.track_not_streamable_count += 1
+                        self.tracks_not_streamable.append(track_info.album_id)
+                    else:
+                        self.track_download_failed_count += 1
+                        self.albums_with_failed_tracks.append(track_info.album_id)
 
                 # If we got track info, break out of retry loop
                 if track_info is not None:
@@ -4481,6 +4665,7 @@ class Downloader:
             
             symbols = self._get_status_symbols()
             d_print(f'=== {symbols["skip"]} Track skipped ===', drop_level=header_drop_level)
+            self.track_skipped_count += 1
 
             return return_with_blank_line("SKIPPED")
 
@@ -4677,6 +4862,7 @@ class Downloader:
                     self.set_indent_number(indent_level)
                 symbols = self._get_status_symbols()
                 d_print(f'=== {symbols["skip"]} Track skipped ===', drop_level=header_drop_level)
+                self.track_skipped_count += 1
                 return return_with_blank_line("SKIPPED")
 
         self._prepare_track_download_path(track_location)
@@ -4805,7 +4991,7 @@ class Downloader:
                 meta_sep = self.global_settings['formatting'].get('metadata_separator', ';')
                 split_meta = self.global_settings['formatting'].get('split_metadata', True)
                 enable_zfill = self.global_settings['formatting'].get('enable_zfill', False)
-                tag_file(final_location, embed_artwork_path, track_info, credits_list, embedded_lyrics, container, metadata_separator=meta_sep, split_metadata=split_meta, enable_zfill=enable_zfill)
+                tag_file(final_location, embed_artwork_path, track_info, credits_list, embedded_lyrics, container, metadata_separator=meta_sep, split_metadata=split_meta, enable_zfill=enable_zfill, service_name=self._service_display_name())
             else:
                 pass  # Skip tagging for unsupported containers like WAV
 
@@ -4828,7 +5014,7 @@ class Downloader:
                     embed_artwork_path = artwork_path if self.global_settings['covers']['embed_cover'] else None
                     meta_sep = self.global_settings['formatting'].get('metadata_separator', ';')
                     split_meta = self.global_settings['formatting'].get('split_metadata', True)
-                    tag_file(old_track_location, embed_artwork_path, track_info, credits_list, embedded_lyrics, old_container, metadata_separator=meta_sep, split_metadata=split_meta, enable_zfill=enable_zfill)
+                    tag_file(old_track_location, embed_artwork_path, track_info, credits_list, embedded_lyrics, old_container, metadata_separator=meta_sep, split_metadata=split_meta, enable_zfill=enable_zfill, service_name=self._service_display_name())
                 else:
                     pass  # Skip tagging for unsupported containers
             
@@ -4841,6 +5027,7 @@ class Downloader:
 
             symbols = self._get_status_symbols()
             d_print(f'=== {symbols["success"]} Track completed ===', drop_level=header_drop_level)
+            self.track_download_count += 1
 
             # Clean up temporary artwork file
             if artwork_path and os.path.exists(artwork_path):
@@ -5076,8 +5263,10 @@ class Downloader:
         covers = self.global_settings.get('covers', {})
         save_original = bool(covers.get('save_original_cover_size', False))
         return {
-            'should_resize': not save_original,
-            'resolution': covers.get('external_resolution', 3000) if is_external else covers.get('main_resolution', 1400),
+            # PR #2: modules that explicitly declare needs_cover_resize always get
+            # resized covers; otherwise honor the save_original_cover_size setting.
+            'should_resize': (not save_original) or ModuleFlags.needs_cover_resize in self.module_settings[module_name].flags,
+            'resolution': self.global_settings['covers']['external_resolution'] if is_external else self.global_settings['covers']['main_resolution'],
             'compression': self.global_settings['covers']['external_compression'] if is_external else self.global_settings['covers']['main_compression'],
             'format': self.global_settings['covers']['external_format'] if is_external else 'jpg'
         }
