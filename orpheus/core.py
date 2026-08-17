@@ -44,7 +44,7 @@ class Orpheus:
                 "progress_bar": False,
                 "throttle_batch_size": 0,
                 "throttle_pause_seconds": 30,
-                "create_service_folder": False,
+                "create_platform_folder": False,
             },
             "artist_downloading":{
                 "return_credited_albums": True,
@@ -57,6 +57,7 @@ class Orpheus:
                 "album_format": "{artist}/{name}",
                 "playlist_format": "{name}",
                 "track_filename_format": "{track_number}. {artist} - {name}",
+                "playlist_track_filename_format": "",
                 "single_full_path_format": "{artist} - {name}",
                 "metadata_separator": ", ",
                 "filename_separator": "",
