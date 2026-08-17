@@ -348,6 +348,26 @@ class Downloader:
         """When True, skip tracks whose target file already exists."""
         return bool(self.global_settings.get('advanced', {}).get('ignore_existing_files', False))
 
+    def _service_folder_name(self) -> str:
+        """Display name of the source service (e.g. 'Apple Music'), used for per-service subfolders."""
+        raw = ''
+        if self.service_name:
+            ms = self.module_settings.get(self.service_name)
+            raw = getattr(ms, 'service_name', None) or self.service_name
+        elif getattr(self, 'service', None) is not None:
+            raw = getattr(self.service, 'service_name', None) or ''
+        name = str(raw or '').strip()
+        return sanitise_name(name) if name else ''
+
+    def _service_base_path(self) -> str:
+        """Top-level download base path, optionally nested under a per-service folder."""
+        if not self.global_settings.get('general', {}).get('create_service_folder', False):
+            return self.path
+        folder = self._service_folder_name()
+        if not folder:
+            return self.path
+        return os.path.join(self.path, folder)
+
     def _prepare_track_download_path(self, track_location: str) -> None:
         """Remove an existing track file so a fresh download can overwrite it."""
         if self._skip_existing_files_enabled():
@@ -360,7 +380,7 @@ class Downloader:
 
     def _normalize_error_log_dir(self, output_dir: str) -> str:
         if not output_dir:
-            output_dir = self.path or '.'
+            output_dir = self._service_base_path() or '.'
         output_dir = output_dir.replace('\\', '/')
         if not output_dir.endswith('/'):
             output_dir += '/'
@@ -498,8 +518,8 @@ class Downloader:
     ):
         if album_location:
             self._ensure_download_error_log_target(album_location)
-        elif self.path:
-            self._ensure_download_error_log_target(self.path)
+        elif self._service_base_path():
+            self._ensure_download_error_log_target(self._service_base_path())
 
         if track_info is not None:
             track_name = track_name or track_info.name
@@ -615,8 +635,8 @@ class Downloader:
         )
         if album_location:
             self._ensure_download_error_log_target(album_location)
-        elif self.path:
-            self._ensure_download_error_log_target(self.path)
+        elif self._service_base_path():
+            self._ensure_download_error_log_target(self._service_base_path())
         self._append_download_error_log_line(line)
 
     def _finalize_download_error_log(self):
@@ -1983,7 +2003,7 @@ class Downloader:
         playlist_tags['name'] = safe_playlist_name # Use the safe name for path formatting
         playlist_tags['explicit'] = ' 🅴' if playlist_info.explicit else ''
         playlist_path_formatted_name = self.global_settings['formatting']['playlist_format'].format(**playlist_tags)
-        playlist_path_raw = os.path.join(self.path, playlist_path_formatted_name)
+        playlist_path_raw = os.path.join(self._service_base_path(), playlist_path_formatted_name)
         # fix path byte limit
         playlist_path = fix_byte_limit(playlist_path_raw)
         if (
@@ -2473,7 +2493,7 @@ class Downloader:
         """True when albums download under an artist/label folder (not the root output path)."""
         if not path:
             return False
-        base = (self.path or '').rstrip('/\\')
+        base = (self._service_base_path() or '').rstrip('/\\')
         nested = path.rstrip('/\\')
         if not base or not nested:
             return False
@@ -3161,6 +3181,7 @@ class Downloader:
         # Better detection for single track downloads
         is_single_track_download = (
             album_location == self.path or  # Original condition (CLI and proper single tracks)
+            album_location == self._service_base_path() or  # Single track under a per-service folder
             (hasattr(self, 'download_mode') and self.download_mode is DownloadTypeEnum.track)  # Track download mode
         )
         
@@ -3370,7 +3391,7 @@ class Downloader:
         number_of_tracks = len(album_info.tracks)
         self._current_disc_track_totals = self._compute_disc_track_totals(album_info.tracks)
 
-        path = self.path if not path else path
+        path = self._service_base_path() if not path else path
         use_discography_format = self._path_is_nested_discography_container(path)
 
         if number_of_tracks > 1 or self.global_settings['formatting']['force_album_format']:
@@ -3789,7 +3810,7 @@ class Downloader:
         # Display selected quality (global + per-request overrides)
         pretty_quality = self._get_display_quality(extra_kwargs)
         self.print(f'Quality: {pretty_quality}')
-        artist_path = os.path.join(self.path, sanitise_name(artist_name)) + '/'
+        artist_path = os.path.join(self._service_base_path(), sanitise_name(artist_name)) + '/'
         
         # Create the artist directory if it doesn't exist
         os.makedirs(artist_path, exist_ok=True)
@@ -4070,7 +4091,7 @@ class Downloader:
         # Display selected quality (global + per-request overrides)
         pretty_quality = self._get_display_quality(extra_kwargs)
         self.print(f'Quality: {pretty_quality}')
-        label_path = os.path.join(self.path, sanitise_name(label_name)) + '/'
+        label_path = os.path.join(self._service_base_path(), sanitise_name(label_name)) + '/'
         os.makedirs(label_path, exist_ok=True)
         self._reset_discography_album_path_registry()
 
@@ -4728,7 +4749,7 @@ class Downloader:
         # Create track location
         if not album_location:
             # For single track downloads, use the base path
-            album_location = self.path
+            album_location = self._service_base_path()
         track_location = self._create_track_location(album_location, track_info, extra_kwargs=extra_kwargs)
 
         # Ensure parent directory exists for custom single path formats that include subfolders.

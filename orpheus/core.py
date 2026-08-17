@@ -44,6 +44,7 @@ class Orpheus:
                 "progress_bar": False,
                 "throttle_batch_size": 0,
                 "throttle_pause_seconds": 30,
+                "create_service_folder": False,
             },
             "artist_downloading":{
                 "return_credited_albums": True,
