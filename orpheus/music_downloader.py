@@ -209,7 +209,7 @@ def simplify_error_message(error_str: str) -> str:
             return "Apple Music streaming error (FFmpeg required for processing)"
         
         if 'not authenticated' in error_lower or 'cookies.txt' in error_lower:
-            return "Apple Music authentication error (cookies.txt required)"
+            return "Apple Music authentication required (provide cookies.txt or Media User Token)"
 
         # Surface the actual error for generic failures (format: "... - {actual_error}")
         if " - " in error_str:
