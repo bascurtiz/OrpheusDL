@@ -304,6 +304,26 @@ def json_enum_serializer(obj):
     raise TypeError(f'Object of type {obj.__class__.__name__} is not JSON serializable')
 
 
+def _format_path_template(template, tags, setting_name):
+    """Format a user-configured path template with a friendly error for bad variables.
+
+    A typo like setting Album Format to ``{track_number}. {artist} - {name}`` would
+    otherwise surface as a bare ``KeyError: 'track_number'`` in the download log.
+    """
+    try:
+        return template.format(**tags)
+    except KeyError as e:
+        unknown = e.args[0] if e.args else '?'
+        known = sorted(str(k) for k, v in tags.items() if isinstance(v, (str, int, float, bool)))
+        available = ', '.join(known) if known else 'none'
+        raise ValueError(
+            f"Unknown variable '{{{unknown}}}' in '{setting_name}'. "
+            f"Available variables: {available}"
+        ) from e
+    except ValueError as e:
+        raise ValueError(f"Invalid '{setting_name}' template: {e}") from e
+
+
 class Downloader:
     def __init__(self, settings, module_controls, oprinter, path, third_party_modules=None, use_ansi_colors=True):
         self.global_settings = settings
@@ -2128,7 +2148,9 @@ class Downloader:
         playlist_tags['name'] = safe_playlist_name # Use the safe name for path formatting
         playlist_tags['explicit'] = ' 🅴' if playlist_info.explicit else ''
         playlist_tags['platform'] = self._platform_folder_name()
-        playlist_path_formatted_name = self.global_settings['formatting']['playlist_format'].format(**playlist_tags)
+        playlist_path_formatted_name = _format_path_template(
+            self.global_settings['formatting']['playlist_format'], playlist_tags, 'Playlist folder format'
+        )
         playlist_path_raw = os.path.join(self._platform_base_path(), playlist_path_formatted_name)
         # fix path byte limit
         playlist_path = fix_byte_limit(playlist_path_raw)
@@ -3156,8 +3178,9 @@ class Downloader:
         album_tags['platform'] = self._platform_folder_name()
 
         album_format_template = self._resolve_album_format_template(use_discography_format)
+        album_format_setting = 'Discography folder format' if use_discography_format else 'Album folder format'
         album_path_formatted_name = self._sanitize_formatted_folder_path(
-            album_format_template.format(**album_tags)
+            _format_path_template(album_format_template, album_tags, album_format_setting)
         )
         album_path_raw = os.path.join(path, album_path_formatted_name)
         # fix path byte limit
@@ -3332,6 +3355,7 @@ class Downloader:
         
         if is_single_track_download:
             format_string = self.global_settings['formatting']['single_full_path_format']
+            format_setting_name = 'Single track filename'
             # For single tracks, {quality} should mirror the album folder style
             # (e.g. "[🅷 HI-RES]" / "[◗◖ ATMOS]"). Derive the label from the resolved
             # track_info so it is deterministic across downloads; only fall back to the
@@ -3350,8 +3374,10 @@ class Downloader:
             )
             if is_playlist_download and playlist_format:
                 format_string = playlist_format
+                format_setting_name = 'Playlist track filename'
             else:
                 format_string = self.global_settings['formatting']['track_filename_format']
+                format_setting_name = 'Track filename'
 
         # Keep both artist and title visible for very long single-track paths.
         if is_single_track_download and '{artist}' in format_string and '{name}' in format_string:
@@ -3369,7 +3395,7 @@ class Downloader:
 
             # Iteratively rebalance by shrinking the longer field until key path components fit.
             for _ in range(512):
-                candidate_rel = format_string.format(**track_tags).replace('\\', '/')
+                candidate_rel = _format_path_template(format_string, track_tags, format_setting_name).replace('\\', '/')
                 candidate_dir, candidate_name = os.path.split(candidate_rel)
 
                 dir_segments_ok = all(
@@ -3405,7 +3431,7 @@ class Downloader:
             track_tags['track_artist'] = track_tags.get('artist', '')
         
         # Format the filename
-        track_filename = format_string.format(**track_tags)
+        track_filename = _format_path_template(format_string, track_tags, format_setting_name)
 
         # Playlist option: nest tracks under Artist - Album inside the playlist folder.
         is_playlist_download = (
