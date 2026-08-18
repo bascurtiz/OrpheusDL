@@ -2133,7 +2133,7 @@ class Downloader:
         # fix path byte limit
         playlist_path = fix_byte_limit(playlist_path_raw)
         if (
-            playlist_path != playlist_path_raw.replace('\\', '/')
+            os.path.normpath(playlist_path) != os.path.normpath(playlist_path_raw)
             and self.global_settings.get('advanced', {}).get('debug_mode', False)
         ):
             self.print('⚠ Path too long, playlist folder name was truncated for filesystem safety.')
@@ -3163,7 +3163,7 @@ class Downloader:
         # fix path byte limit
         album_path = fix_byte_limit(album_path_raw)
         if (
-            album_path != album_path_raw.replace('\\', '/')
+            os.path.normpath(album_path) != os.path.normpath(album_path_raw)
             and self.global_settings.get('advanced', {}).get('debug_mode', False)
         ):
             self.print('⚠ Path too long, album folder name was truncated for filesystem safety.')
@@ -3472,7 +3472,7 @@ class Downloader:
         # Fix byte limit
         track_location = fix_byte_limit(track_location_raw)
         if (
-            track_location != track_location_raw.replace('\\', '/')
+            os.path.normpath(track_location) != os.path.normpath(track_location_raw)
             and self.global_settings.get('advanced', {}).get('debug_mode', False)
         ):
             self.print('⚠ Path too long, track filename was truncated for filesystem safety.')
