@@ -1969,14 +1969,6 @@
               onclick="this.classList.toggle('on')"></div>
           </div>
           <div class="setting-row">
-            <div class="setting-label"
-              title="When downloading albums, ignore tracks where the artist differs from the main album artist.">Ignore
-              Different Artists <div class="help-icon">?</div>
-            </div>
-            <div class="toggle" id="global-ignore_different_artists"
-              data-path="global.advanced.ignore_different_artists" onclick="this.classList.toggle('on')"></div>
-          </div>
-          <div class="setting-row">
             <div class="setting-label" title="Keep the original file after successful codec conversion.">Conversion Keep
               Original <div class="help-icon">?</div>
             </div>
@@ -2005,13 +1997,6 @@
               FFmpeg Path <div class="help-icon">?</div>
             </div>
             <input type="text" id="global-ffmpeg_path" data-path="global.advanced.ffmpeg_path" style="width:180px;" />
-          </div>
-          <div class="setting-row">
-            <div class="setting-label" title="Tolerance for accepting covers with slightly different sizes (0-100).">
-              Cover Variance Threshold <div class="help-icon">?</div>
-            </div>
-            <input type="text" id="global-cover_variance_threshold" data-path="global.advanced.cover_variance_threshold"
-              style="width:80px;text-align:center;" />
           </div>
           <div class="setting-row">
             <div class="setting-label"
@@ -3696,7 +3681,7 @@
           parent[key] = el.classList.contains('on');
         } else {
           let val = el.value;
-          const numericIds = ['global-search_limit', 'global-main_resolution', 'global-external_resolution', 'global-cover_variance_threshold', 'global-throttle_batch_size', 'global-throttle_pause_seconds'];
+          const numericIds = ['global-search_limit', 'global-main_resolution', 'global-external_resolution', 'global-throttle_batch_size', 'global-throttle_pause_seconds'];
           if (el.type === 'number' || el.type === 'range' || numericIds.includes(el.id)) val = parseInt(val) || 0;
           parent[key] = val;
         }

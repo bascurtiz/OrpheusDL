@@ -45,6 +45,9 @@ class Orpheus:
                 "throttle_batch_size": 0,
                 "throttle_pause_seconds": 30,
                 "create_platform_folder": False,
+                "disable_subscription_checks": False,
+                "ignore_existing_files": False,
+                "reverify_existing_files": False,
             },
             "artist_downloading":{
                 "return_credited_albums": True,
@@ -73,6 +76,27 @@ class Orpheus:
                 "proprietary_codecs": False,
                 "spatial_codecs": True,
                 "include_dolby_atmos": False,
+            },
+            "codec_conversion": {
+                "codec_conversions": {
+                    "alac": "flac",
+                    "wav": "flac",
+                    "vorbis": "vorbis"
+                },
+                "conversion_flags": {
+                    "flac": {
+                        "compression_level": "5"
+                    },
+                    "mp3": {
+                        "qscale:a": "0"
+                    },
+                    "aac": {
+                        "audio_bitrate": "256k"
+                    }
+                },
+                "conversion_keep_original": False,
+                "ffmpeg_path": "ffmpeg",
+                "enable_undesirable_conversions": False
             },
             "module_defaults": {
                 "lyrics": "default",
@@ -106,31 +130,7 @@ class Orpheus:
             },
             "advanced": {
                 "advanced_login_system": False,
-                "codec_conversions": {
-                    "alac": "flac",
-                    "wav": "flac",
-                    "vorbis": "vorbis"
-                },
-                "conversion_flags": {
-                    "flac": {
-                        "compression_level": "5"
-                    },
-                    "mp3": {
-                        "qscale:a": "0"
-                    },
-                    "aac": {
-                        "audio_bitrate": "256k"
-                    }
-                },
-                "conversion_keep_original": False,
-                "ffmpeg_path": "ffmpeg",
-                "cover_variance_threshold": 8,
-                "debug_mode": False,
-                "disable_subscription_checks": False,
-                "enable_undesirable_conversions": False,
-                "ignore_existing_files": False,
-                "reverify_existing_files": False,
-                "ignore_different_artists": True
+                "debug_mode": False
             }
         }
 
@@ -284,7 +284,7 @@ class Orpheus:
                     orpheus_options = OrpheusOptions(
                         debug_mode = advanced_settings.get('debug_mode', False),
                         quality_tier = QualityEnum[general_settings.get('download_quality', 'hifi').upper()],
-                        disable_subscription_check = advanced_settings.get('disable_subscription_checks', False),
+                        disable_subscription_check = general_settings.get('disable_subscription_checks', advanced_settings.get('disable_subscription_checks', False)),
                         default_cover_options = CoverOptions(
                             file_type = ImageFileTypeEnum[covers_settings.get('external_format', 'png')],
                             resolution = covers_settings.get('main_resolution', 1400),
