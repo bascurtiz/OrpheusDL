@@ -249,7 +249,14 @@ def tag_file(file_path: str, image_path: str, track_info: TrackInfo, credits_lis
                 tagger.tags._EasyID3__id3._DictProxy__dict['TDAT'] = TDAT(encoding=3, text=release_dd_mm)
                 tagger['date'] = str(track_info.release_year)
             else:
-                tagger['date'] = track_info.tags.release_date
+                # Vorbis comments (FLAC/OGG/Opus/WebM) conventionally store only
+                # the release YEAR in DATE (e.g. "1982"), not a full ISO date.
+                # MP3 above and the MP4 branch below already expose the year.
+                tagger['date'] = (
+                    str(track_info.release_year)
+                    if track_info.release_year
+                    else track_info.tags.release_date[:4]
+                )
         else:
             tagger['date'] = str(track_info.release_year)
         if track_info.tags.copyright: tagger['copyright'] = track_info.tags.copyright
