@@ -366,13 +366,13 @@ class Downloader:
 
     def _skip_existing_files_enabled(self) -> bool:
         """When True, skip tracks whose target file already exists."""
-        return bool(self.global_settings.get('advanced', {}).get('ignore_existing_files', False))
+        return bool(self.global_settings.get('general', {}).get('ignore_existing_files', False))
 
     def _reverify_existing_files_enabled(self) -> bool:
         """When True (and skip-if-exists is on), an existing file is only skipped
         if its duration matches the track's expected duration; mismatched (stale)
         files are removed and re-downloaded so their tags are refreshed."""
-        return bool(self.global_settings.get('advanced', {}).get('reverify_existing_files', False))
+        return bool(self.global_settings.get('general', {}).get('reverify_existing_files', False))
 
     def _merge_same_name_albums_enabled(self) -> bool:
         """When True, same-name editions of an album merge into one folder during
@@ -5457,16 +5457,28 @@ class Downloader:
     def _convert_file_if_needed(self, file_path, track_info, d_print):
         """Convert file based on codec_conversions settings - based on old working version"""
         try:
-            # Get conversion settings (matching old version structure)
+            # Parse the conversion table entry-by-entry so one bad row can't disable the rest.
             try:
-                from utils.models import CodecEnum, codec_data
-                from utils.utils import silentremove
-                conversions = {CodecEnum[k.upper()]: CodecEnum[v.upper()] for k, v in self.global_settings['advanced']['codec_conversions'].items()}
-            except:
-                conversions = {}
-                print('Warning: codec_conversions setting is invalid!')  # Always print this warning
-                return (file_path, None, None)  # Return tuple like old version
-            
+                raw_conversions = self.global_settings['codec_conversion']['codec_conversions']
+            except (KeyError, TypeError):
+                raw_conversions = None
+
+            conversions = {}
+            if raw_conversions is None:
+                return (file_path, None, None)  # Not configured — nothing to convert
+            if not isinstance(raw_conversions, dict):
+                print('        Warning: codec_conversions setting is not a dictionary, skipping conversions')
+                return (file_path, None, None)
+
+            valid_names = ', '.join(e.name.lower() for e in CodecEnum if e.name != 'NONE')
+            for source_codec, target_codec in raw_conversions.items():
+                try:
+                    conversions[CodecEnum[str(source_codec).upper()]] = CodecEnum[str(target_codec).upper()]
+                except KeyError:
+                    bad = source_codec if str(source_codec).upper() not in CodecEnum.__members__ else target_codec
+                    print(f'        Warning: ignoring invalid codec conversion "{source_codec} -> {target_codec}": '
+                          f'"{bad}" is not a recognized codec (valid: {valid_names})')
+
             if not conversions:
                 return (file_path, None, None)  # Return tuple like old version
             
@@ -5494,7 +5506,7 @@ class Downloader:
                 return (file_path, None, None)
             
             # Check for undesirable conversions (fixed logic but matching old version behavior)
-            enable_undesirable = self.global_settings.get('advanced', {}).get('enable_undesirable_conversions', False)
+            enable_undesirable = self.global_settings.get('codec_conversion', {}).get('enable_undesirable_conversions', False)
             if not old_codec_data.lossless and new_codec_data.lossless and not enable_undesirable:
                 print('        Warning: Undesirable lossy-to-lossless conversion detected, skipping')
                 return (file_path, None, None)
@@ -5508,7 +5520,7 @@ class Downloader:
             
             # Get conversion flags
             try:
-                conversion_flags = {CodecEnum[k.upper()]:v for k,v in self.global_settings['advanced']['conversion_flags'].items()}
+                conversion_flags = {CodecEnum[k.upper()]:v for k,v in self.global_settings['codec_conversion']['conversion_flags'].items()}
             except:
                 conversion_flags = {}
                 print('        Warning: conversion_flags setting is invalid, using defaults')
@@ -5529,7 +5541,7 @@ class Downloader:
             import shutil
             
             # Get custom ffmpeg path from settings
-            ffmpeg_path = self.global_settings.get('advanced', {}).get('ffmpeg_path', 'ffmpeg')
+            ffmpeg_path = self.global_settings.get('codec_conversion', {}).get('ffmpeg_path', 'ffmpeg')
             if not ffmpeg_path or ffmpeg_path.strip() == '':
                 ffmpeg_path = 'ffmpeg'
             
@@ -5606,7 +5618,7 @@ class Downloader:
                     raise Exception(f'ffmpeg error converting to {ffmpeg_codec}:\n{error_msg}')
             
             # Handle file management (matching old version exactly)
-            keep_original = self.global_settings.get('advanced', {}).get('conversion_keep_original', False)
+            keep_original = self.global_settings.get('codec_conversion', {}).get('conversion_keep_original', False)
             old_track_location, old_container = None, None
             
             # Remove original if output path is the same (matching old version logic)
