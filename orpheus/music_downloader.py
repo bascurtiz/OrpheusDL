@@ -168,8 +168,11 @@ def simplify_error_message(error_str: str) -> str:
     # wrapper-v2 issue #12: the staged Apple Music .so files lack the
     # getPersistentKey symbol, so the CKC exchange fails with -42812 even when
     # login and playback succeed. Point the user at the documented lib swap fix.
+    # "worker stdout closed" is the same failure: the wrapper worker raises
+    # SVError (Fairplay -42812), aborts (fatal signal 6/SIGABRT) before it can
+    # send the JSON error, and gamdl only sees the closed stdout.
     if ('fps decrypt failed' in error_lower or 'kdprocessresponseckc' in error_lower
-            or 'getpersistentkey' in error_lower):
+            or 'getpersistentkey' in error_lower or 'worker stdout closed' in error_lower):
         return (
             "Wrapper decryption failed (FairPlay -42812). Known wrapper-v2 issue: the staged "
             "Apple Music libraries are missing the getPersistentKey symbol. Replace the .so "
