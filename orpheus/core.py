@@ -176,7 +176,7 @@ class Orpheus:
 
         # Module preparation (not loaded yet for performance purposes)
         # Modules in this set are skipped during discovery (e.g. deprecated/removed but folder may remain on macOS upgrades)
-        modules_ignored = {'jiosaavn'}
+        modules_ignored = {'jiosaavn', 'beatsource'}
         os.makedirs('modules', exist_ok=True)
         module_list = [m.lower() for m in os.listdir('modules') if m.lower() not in modules_ignored and os.path.exists(f'modules/{m}/interface.py')]
         if not module_list or module_list == ['example']:
