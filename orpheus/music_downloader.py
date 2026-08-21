@@ -51,7 +51,6 @@ PLATFORM_COLORS = {
     "tidal": "\033[96m",         # Bright cyan (#33ffe7 -> bright cyan)
     "apple music": "\033[91m",   # Bright red (#FA586A -> bright red)
     "beatport": "\033[92m",      # Bright green (#00ff89 -> bright green)
-    "beatsource": "\033[94m",    # Bright blue (#16a8f4 -> bright blue)
     "deezer": "\033[38;5;129m",        # Bright magenta (#a238ff -> bright magenta)
     "qobuz": "\033[34m",         # Blue (#0070ef -> blue)
     "soundcloud": "\033[38;5;208m",    # Bright yellow/orange (#ff5502 -> bright yellow as closest)
@@ -164,7 +163,21 @@ def simplify_error_message(error_str: str) -> str:
         if " - " in error_str:
             return error_str.split(" - ", 1)[-1].strip()
         return error_str
-    
+
+    # Known wrapper-v2 FairPlay decryption failure (Apple Music ALAC/lossless).
+    # wrapper-v2 issue #12: the staged Apple Music .so files lack the
+    # getPersistentKey symbol, so the CKC exchange fails with -42812 even when
+    # login and playback succeed. Point the user at the documented lib swap fix.
+    if ('fps decrypt failed' in error_lower or 'kdprocessresponseckc' in error_lower
+            or 'getpersistentkey' in error_lower):
+        return (
+            "Wrapper decryption failed (FairPlay -42812). Known wrapper-v2 issue: the staged "
+            "Apple Music libraries are missing the getPersistentKey symbol. Replace the .so "
+            "files in rootfs/system/lib64/ with the ones from github.com/WorldObservationLog/"
+            "wrapper, rebuild the Docker image from scratch, and log in again (wrapper-v2 "
+            "issue #12)."
+        )
+
     # JSON API error responses (e.g., Apple Music, Qobuz)
     try:
         if ('{' in error_str and '}' in error_str) or ('[' in error_str and ']' in error_str):
@@ -1306,10 +1319,9 @@ class Downloader:
         if msg.startswith(f"{service_key} --> "):
             msg = msg[len(f"{service_key} --> "):]
         
-        # Apple Music / Beatport / Beatsource: Remove the prefix entirely if the message already identifies the service
+        # Apple Music / Beatport: Remove the prefix entirely if the message already identifies the service
         if (service_key == 'applemusic' and ('Apple Music' in msg or 'cookies.txt' in msg)) or \
            (service_key == 'beatport' and 'Beatport' in msg) or \
-           (service_key == 'beatsource' and 'Beatsource' in msg) or \
            (service_key == 'deezer' and 'Deezer' in msg) or \
            (service_key == 'qobuz' and 'Qobuz' in msg) or \
            (service_key == 'spotify' and 'Spotify' in msg):
@@ -2101,7 +2113,7 @@ class Downloader:
             self.service.get_playlist_info, kwargs_for_playlist_info
         )
 
-        if service_name_lower in ['beatport', 'beatsource']:
+        if service_name_lower == 'beatport':
             if 'data' in kwargs_for_playlist_info:
                 logging.debug(f"Removing 'data' from extra_kwargs for {self.service_name}.get_playlist_info as it is unexpected.")
                 kwargs_for_playlist_info.pop('data', None)
@@ -3939,8 +3951,8 @@ class Downloader:
         if hasattr(self, 'service_name') and self.service_name:
             service_name_lower = self.service_name.lower()
 
-        # Specific kwarg handling for Beatport/Beatsource for the 'data' key
-        if service_name_lower in ['beatport', 'beatsource']:
+        # Specific kwarg handling for Beatport for the 'data' key
+        if service_name_lower == 'beatport':
             if 'data' in prepared_kwargs:
                 logging.debug(f"Popping 'data' kwarg for {self.service_name}.get_artist_info as it is unexpected.")
                 prepared_kwargs.pop('data', None)
@@ -3959,7 +3971,7 @@ class Downloader:
 
         # Call get_artist_info based on service-specific signature requirements
         try:
-            if service_name_lower in ['deezer', 'qobuz', 'soundcloud', 'tidal', 'beatport', 'beatsource', 'amazonmusic']:
+            if service_name_lower in ['deezer', 'qobuz', 'soundcloud', 'tidal', 'beatport', 'amazonmusic']:
                 # These services require 'get_credited_albums' (the boolean value) as the second positional argument.            
                 artist_info: ArtistInfo = self.service.get_artist_info(artist_id, fetch_credited_albums_value, **prepared_kwargs)
             elif service_name_lower == 'spotify':
@@ -4247,7 +4259,7 @@ class Downloader:
         print()
 
     def download_label(self, label_id, extra_kwargs=None):
-        """Download all releases and tracks for a label (Beatport/Beatsource). Uses same flow as artist."""
+        """Download all releases and tracks for a label (Beatport). Uses same flow as artist."""
         prepared_kwargs = {}
         if extra_kwargs:
             prepared_kwargs.update(extra_kwargs)
@@ -4811,7 +4823,6 @@ class Downloader:
                     
                     if (service_key == 'applemusic' and ('Apple Music' in msg or 'cookies.txt' in msg)) or \
                        (service_key == 'beatport' and 'Beatport' in msg) or \
-                       (service_key == 'beatsource' and 'Beatsource' in msg) or \
                        (service_key == 'deezer' and 'Deezer' in msg) or \
                        (service_key == 'qobuz' and 'Qobuz' in msg) or \
                        (service_key == 'spotify' and 'Spotify' in msg):
@@ -4836,7 +4847,6 @@ class Downloader:
                         
                     if (service_key == 'applemusic' and ('Apple Music' in msg or 'cookies.txt' in msg)) or \
                        (service_key == 'beatport' and 'Beatport' in msg) or \
-                       (service_key == 'beatsource' and 'Beatsource' in msg) or \
                        (service_key == 'deezer' and 'Deezer' in msg) or \
                        (service_key == 'qobuz' and 'Qobuz' in msg) or \
                        (service_key == 'spotify' and 'Spotify' in msg):
@@ -4873,7 +4883,6 @@ class Downloader:
                 
                 if (service_key == 'applemusic' and ('Apple Music' in msg or 'cookies.txt' in msg)) or \
                    (service_key == 'beatport' and 'Beatport' in msg) or \
-                   (service_key == 'beatsource' and 'Beatsource' in msg) or \
                    (service_key == 'deezer' and 'Deezer' in msg) or \
                    (service_key == 'qobuz' and 'Qobuz' in msg) or \
                    (service_key == 'spotify' and 'Spotify' in msg):
