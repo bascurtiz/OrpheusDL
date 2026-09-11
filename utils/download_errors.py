@@ -9,7 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 PLATFORM_TRACK_URLS = {
     'tidal': 'https://tidal.com/browse/track/{id}',
     'spotify': 'https://open.spotify.com/track/{id}',
-    'qobuz': 'https://www.qobuz.com/track/{id}',
+    'qobuz': 'https://play.qobuz.com/track/{id}',
     'deezer': 'https://www.deezer.com/track/{id}',
     'applemusic': 'https://music.apple.com/song/{id}',
     'apple music': 'https://music.apple.com/song/{id}',
@@ -22,7 +22,7 @@ PLATFORM_TRACK_URLS = {
 PLATFORM_ALBUM_URLS = {
     'tidal': 'https://tidal.com/browse/album/{id}',
     'spotify': 'https://open.spotify.com/album/{id}',
-    'qobuz': 'https://www.qobuz.com/album/{id}',
+    'qobuz': 'https://play.qobuz.com/album/{id}',
     'deezer': 'https://deezer.com/album/{id}',
     'applemusic': 'https://music.apple.com/album/{id}',
     'apple music': 'https://music.apple.com/album/{id}',
@@ -37,7 +37,7 @@ PLATFORM_ALBUM_URLS = {
 PLATFORM_PLAYLIST_URLS = {
     'tidal': 'https://tidal.com/browse/playlist/{id}',
     'spotify': 'https://open.spotify.com/playlist/{id}',
-    'qobuz': 'https://www.qobuz.com/playlist/{id}',
+    'qobuz': 'https://play.qobuz.com/playlist/{id}',
     'deezer': 'https://www.deezer.com/playlist/{id}',
     'applemusic': 'https://music.apple.com/playlist/{id}',
     'apple music': 'https://music.apple.com/playlist/{id}',
