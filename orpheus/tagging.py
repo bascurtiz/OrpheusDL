@@ -181,8 +181,12 @@ def tag_file(file_path: str, image_path: str, track_info: TrackInfo, credits_lis
             
             if container in {ContainerEnum.flac, ContainerEnum.ogg, ContainerEnum.opus, ContainerEnum.webm}:
                 tagger['ALBUMARTIST'] = album_artist_display
+                if track_info.tags.album_artists: tagger['albumartist'] = track_info.tags.album_artists
+
             else:
                 tagger['albumartist'] = album_artist_display
+                if track_info.tags.album_artists: tagger['albumartist'] = track_info.tags.album_artists
+
 
         if split_metadata:
             tagger['artist'] = track_info.artists if isinstance(track_info.artists, list) else [track_info.artists]
@@ -252,11 +256,12 @@ def tag_file(file_path: str, image_path: str, track_info: TrackInfo, credits_lis
                 # Vorbis comments (FLAC/OGG/Opus/WebM) conventionally store only
                 # the release YEAR in DATE (e.g. "1982"), not a full ISO date.
                 # MP3 above and the MP4 branch below already expose the year.
-                tagger['date'] = (
-                    str(track_info.release_year)
-                    if track_info.release_year
-                    else track_info.tags.release_date[:4]
-                )
+                # tagger['date'] = (
+                #     str(track_info.release_year)
+                #     if track_info.release_year
+                #     else track_info.tags.release_date[:4]
+                # )
+                tagger['date'] = str(track_info.tags.release_date)
         else:
             tagger['date'] = str(track_info.release_year)
         if track_info.tags.copyright: tagger['copyright'] = track_info.tags.copyright
@@ -438,6 +443,8 @@ def tag_file(file_path: str, image_path: str, track_info: TrackInfo, credits_lis
                 try:
                     if split_metadata:
                         tagger[credit_type] = names
+                        if(credit_type.upper() == 'ASSOCIATEDPERFORMER'):
+                            tagger['PERFORMER'] = names
                     else:
                         tagger[credit_type] = [metadata_separator.join(names)]
                 except Exception:

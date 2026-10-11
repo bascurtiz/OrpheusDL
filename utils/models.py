@@ -265,6 +265,7 @@ class ModuleController:
 @dataclass
 class Tags:
     album_artist: Optional[str] = None
+    album_artists: Optional[list] = None
     composer: Optional[str] = None
     track_number: Optional[int] = None
     total_tracks: Optional[int] = None
